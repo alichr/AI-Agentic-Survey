@@ -38,6 +38,9 @@ class ScoreAggregator:
         if self.relevance_enabled:
             if scores.relevance_score is None or scores.relevance_score < self.relevance_threshold:
                 return False
+            # Reject papers in clusters not anchored by seed papers
+            if scores.cluster_label and scores.cluster_label.startswith("Miscellaneous"):
+                return False
 
         if self.affiliation_enabled:
             if scores.affiliation_score is None or scores.affiliation_score < self.affiliation_threshold:

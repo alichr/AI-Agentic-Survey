@@ -17,7 +17,8 @@ def _make_config(relevance_enabled=True, relevance_threshold=0.3,
     return config
 
 
-def _make_paper(relevance=None, affiliation=None, citation=None):
+def _make_paper(relevance=None, affiliation=None, citation=None,
+                cluster_label="Reasoning and Acting"):
     return Paper(
         pdf_path=Path("/tmp/t.pdf"),
         venue="V",
@@ -26,6 +27,7 @@ def _make_paper(relevance=None, affiliation=None, citation=None):
             relevance_score=relevance,
             affiliation_score=affiliation,
             citation_score=citation,
+            cluster_label=cluster_label,
         ),
     )
 
@@ -103,6 +105,37 @@ class TestDecide:
         agg = ScoreAggregator(_make_config(relevance_threshold=0.3))
         paper = _make_paper(relevance=0.299, affiliation=0.5, citation=0.5)
         assert agg.decide(paper) is False
+
+    def test_miscellaneous_cluster_rejected(self):
+        agg = ScoreAggregator(_make_config())
+        paper = _make_paper(relevance=0.9, affiliation=0.9, citation=0.9,
+                            cluster_label="Miscellaneous-3")
+        assert agg.decide(paper) is False
+
+    def test_miscellaneous_0_rejected(self):
+        agg = ScoreAggregator(_make_config())
+        paper = _make_paper(relevance=0.9, affiliation=0.9, citation=0.9,
+                            cluster_label="Miscellaneous-0")
+        assert agg.decide(paper) is False
+
+    def test_seed_labeled_cluster_accepted(self):
+        agg = ScoreAggregator(_make_config())
+        paper = _make_paper(relevance=0.5, affiliation=0.5, citation=0.5,
+                            cluster_label="Tool Use")
+        assert agg.decide(paper) is True
+
+    def test_miscellaneous_ignored_when_relevance_disabled(self):
+        agg = ScoreAggregator(_make_config(relevance_enabled=False))
+        paper = _make_paper(relevance=None, affiliation=0.5, citation=0.5,
+                            cluster_label="Miscellaneous-1")
+        assert agg.decide(paper) is True
+
+    def test_none_cluster_label_accepted(self):
+        """Papers without cluster info (relevance disabled) should pass."""
+        agg = ScoreAggregator(_make_config())
+        paper = _make_paper(relevance=0.5, affiliation=0.5, citation=0.5,
+                            cluster_label=None)
+        assert agg.decide(paper) is True
 
 
 class TestDecideAll:
