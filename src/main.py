@@ -56,6 +56,11 @@ def main():
         action="store_true",
         help="Disable citation scoring",
     )
+    parser.add_argument(
+        "--n-clusters",
+        type=int,
+        help="Number of GMM clusters (default: from config, typically 10)",
+    )
 
     args = parser.parse_args()
 
@@ -75,6 +80,8 @@ def main():
         config.affiliation.enabled = False
     if args.no_citation:
         config.citation.enabled = False
+    if args.n_clusters:
+        config.clustering.n_clusters = args.n_clusters
 
     # Setup logging
     setup_logging(config.pipeline.log_level)

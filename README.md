@@ -110,6 +110,7 @@ python -m src.main --no-affiliation                       # Skip affiliation sco
 python -m src.main --no-relevance                         # Skip relevance scoring
 python -m src.main --papers-dir /path/to/pdfs             # Override papers directory
 python -m src.main --output-dir /path/to/output           # Override output directory
+python -m src.main --n-clusters 5                          # Override number of GMM clusters
 ```
 
 ## Pipeline Stages
@@ -254,7 +255,7 @@ pytest tests/ --cov=src --cov-report=term-missing
 pytest tests/ -m live -v
 ```
 
-**Test suite**: 270 tests across 20 test files (17 unit, 3 integration, 2 live).
+**Test suite**: 277 tests across 20 test files (17 unit, 3 integration, 2 live).
 
 ## Project Structure
 

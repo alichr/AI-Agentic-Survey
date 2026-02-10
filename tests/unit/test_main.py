@@ -153,6 +153,25 @@ class TestMainArgparse:
                         assert config.citation.enabled is False
                         assert config.pipeline.log_level == "ERROR"
 
+    def test_n_clusters_override(self):
+        config = _make_mock_config()
+        with patch("sys.argv", ["main", "--n-clusters", "5"]):
+            with patch("src.main.load_config", return_value=config):
+                with patch("src.main.Pipeline"):
+                    with patch("src.main.setup_logging"):
+                        main()
+                        assert config.clustering.n_clusters == 5
+
+    def test_n_clusters_default_unchanged(self):
+        config = _make_mock_config()
+        original = config.clustering.n_clusters
+        with patch("sys.argv", ["main"]):
+            with patch("src.main.load_config", return_value=config):
+                with patch("src.main.Pipeline"):
+                    with patch("src.main.setup_logging"):
+                        main()
+                        assert config.clustering.n_clusters == original
+
     def test_invalid_log_level_raises(self):
         with patch("sys.argv", ["main", "--log-level", "INVALID"]):
             with pytest.raises(SystemExit):
