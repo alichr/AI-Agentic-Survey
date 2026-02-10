@@ -1,0 +1,10 @@
+{
+  "title": "Agentic AI: A Comprehensive Survey of Autonomous Agent Architectures",
+  "abstract": "Recent advances in large language models (LLMs) have enabled the development of autonomous AI agents capable of complex reasoning, planning, and tool use.",
+  "authors": [
+    {"name": "Alice Smith", "affiliation": "Massachusetts Institute of Technology"},
+    {"name": "Bob Johnson", "affiliation": "Google DeepMind"},
+    {"name": "Carol Williams", "affiliation": "Stanford University"}
+  ],
+  "year": 2025
+}

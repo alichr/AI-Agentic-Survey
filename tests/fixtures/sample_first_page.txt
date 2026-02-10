@@ -1,0 +1,25 @@
+Agentic AI: A Comprehensive Survey of Autonomous Agent Architectures
+
+Alice Smith1, Bob Johnson2, Carol Williams3
+
+1 Massachusetts Institute of Technology, Cambridge, MA, USA
+2 Google DeepMind, London, UK
+3 Stanford University, Stanford, CA, USA
+
+Abstract
+Recent advances in large language models (LLMs) have enabled the development of
+autonomous AI agents capable of complex reasoning, planning, and tool use. In this
+survey, we provide a comprehensive overview of agentic AI systems, covering their
+architecture, capabilities, and applications. We review over 200 papers published
+between 2023 and 2025, categorizing agent designs into reactive, deliberative, and
+hybrid architectures. Our analysis reveals key trends including the emergence of
+multi-agent collaboration frameworks, improved grounding through tool integration,
+and novel approaches to long-horizon planning. We also discuss open challenges
+including safety, alignment, and evaluation methodology.
+
+Keywords: autonomous agents, LLM agents, multi-agent systems, tool use, planning
+
+1 Introduction
+
+The field of artificial intelligence has witnessed a paradigm shift with the advent of
+large language models capable of sophisticated reasoning and generation.

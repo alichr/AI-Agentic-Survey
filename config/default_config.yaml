@@ -1,0 +1,47 @@
+pipeline:
+  papers_dir: "papers"
+  seed_papers_dir: "seed_papers"
+  seed_papers_config: "config/seed_papers.yaml"
+  output_dir: "output"
+  cache_dir: "cache"
+  log_level: "INFO"
+
+vllm:
+  model_name: "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8"
+  base_url: "http://localhost:8000/v1"
+  tensor_parallel_size: 2
+  max_model_len: 64000
+  gpu_memory_utilization: 0.90
+
+embedding:
+  model_name: "Qwen/Qwen3-Embedding-0.6B"
+  device: "cuda:2"
+  batch_size: 32
+
+clustering:
+  n_clusters: 10
+  method: "gmm"
+  dimensionality_reduction: false
+  reduced_dim: 128
+
+relevance:
+  enabled: true
+  threshold: 0.3
+
+affiliation:
+  enabled: true
+  threshold: 0.3
+  university_rankings_path: "config/university_rankings.csv"
+  company_tiers_path: "config/company_tiers.yaml"
+  first_author_weight: 0.5
+  last_author_weight: 0.5
+
+citation:
+  enabled: true
+  threshold: 0.2
+  semantic_scholar_api_key: null
+  rate_limit_rps: 5.0
+  max_retries: 3
+  cache_max_age_days: 30
+  expected_citations: {0: 5, 1: 15, 2: 40, 3: 80, 4: 120, 5: 160}
+  expected_citations_slope: 30
