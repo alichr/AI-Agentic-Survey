@@ -31,14 +31,9 @@ def live_config(tmp_path):
         "tiers": {1: ["Google", "OpenAI", "Meta"]},
     }))
 
-    seed_config = tmp_path / "seed_papers.yaml"
-    seed_config.write_text(yaml.dump({"seed_papers": {}}))
-
     config_data = {
         "pipeline": {
             "papers_dir": str(tmp_path / "papers"),
-            "seed_papers_dir": str(tmp_path / "seed_papers"),
-            "seed_papers_config": str(seed_config),
             "output_dir": str(tmp_path / "output"),
             "cache_dir": str(tmp_path / "cache"),
             "log_level": "INFO",
@@ -52,8 +47,8 @@ def live_config(tmp_path):
             "device": "cuda:0",
             "batch_size": 8,
         },
-        "clustering": {"n_clusters": 2},
-        "relevance": {"enabled": True, "threshold": 0.1},
+        "kmeans": {"n_clusters": 2},
+        "fusion": {"strategy": "consensus_weighted", "threshold": 0.1},
         "affiliation": {
             "enabled": True,
             "threshold": 0.1,
@@ -61,7 +56,7 @@ def live_config(tmp_path):
             "company_tiers_path": str(tiers_yaml),
         },
         "citation": {
-            "enabled": False,  # Don't hit Semantic Scholar in tests
+            "enabled": False,
             "threshold": 0.2,
         },
     }
@@ -71,7 +66,6 @@ def live_config(tmp_path):
 
     # Create papers directory
     (tmp_path / "papers").mkdir()
-    (tmp_path / "seed_papers").mkdir()
 
     return load_config(str(config_path))
 
@@ -98,6 +92,3 @@ class TestLivePipeline:
             rows = list(reader)
 
         assert len(rows) == 1
-        assert rows[0]["status"] in ("ACCEPTED", "REJECTED")
-        # Scores should be populated (not empty)
-        assert rows[0]["relevance_score"] != ""

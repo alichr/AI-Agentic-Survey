@@ -50,19 +50,12 @@ def sample_config(tmp_path, sample_rankings_csv, sample_tiers_yaml):
     """Create a test-friendly Config object pointing to temp dirs."""
     papers_dir = tmp_path / "papers"
     papers_dir.mkdir()
-    seed_dir = tmp_path / "seed_papers"
-    seed_dir.mkdir()
     output_dir = tmp_path / "output"
     cache_dir = tmp_path / "cache"
-
-    seed_config_path = tmp_path / "seed_papers.yaml"
-    seed_config_path.write_text(yaml.dump({"seed_papers": {}}))
 
     config_data = {
         "pipeline": {
             "papers_dir": str(papers_dir),
-            "seed_papers_dir": str(seed_dir),
-            "seed_papers_config": str(seed_config_path),
             "output_dir": str(output_dir),
             "cache_dir": str(cache_dir),
             "log_level": "WARNING",
@@ -76,8 +69,8 @@ def sample_config(tmp_path, sample_rankings_csv, sample_tiers_yaml):
             "device": "cpu",
             "batch_size": 8,
         },
-        "clustering": {"n_clusters": 3},
-        "relevance": {"enabled": True, "threshold": 0.3},
+        "kmeans": {"n_clusters": 3},
+        "fusion": {"strategy": "consensus_weighted", "threshold": 0.3},
         "affiliation": {
             "enabled": True,
             "threshold": 0.3,
@@ -104,21 +97,12 @@ def make_paper(tmp_path):
         filename="paper.pdf",
         venue="ICML",
         pdf_hash=None,
-        is_seed=False,
-        seed_label=None,
         first_page_text=None,
         title=None,
         abstract=None,
         authors=None,
         year=None,
-        embedding=None,
-        relevance_score=None,
-        cluster_id=None,
-        cluster_label=None,
-        affiliation_score=None,
-        citation_score=None,
         citation_count=None,
-        accepted=False,
     ):
         pdf_path = tmp_path / filename
         if not pdf_path.exists():
@@ -140,11 +124,6 @@ def make_paper(tmp_path):
             )
 
         scores = PaperScores(
-            relevance_score=relevance_score,
-            cluster_id=cluster_id,
-            cluster_label=cluster_label,
-            affiliation_score=affiliation_score,
-            citation_score=citation_score,
             citation_count=citation_count,
         )
 
@@ -152,13 +131,9 @@ def make_paper(tmp_path):
             pdf_path=pdf_path,
             venue=venue,
             pdf_hash=pdf_hash,
-            is_seed=is_seed,
-            seed_label=seed_label,
             first_page_text=first_page_text,
             metadata=metadata,
-            embedding=embedding,
             scores=scores,
-            accepted=accepted,
         )
 
     return _make

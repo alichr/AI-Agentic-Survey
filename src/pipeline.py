@@ -1,4 +1,4 @@
-"""Pipeline orchestrator: coordinates all stages of paper selection."""
+"""Multi-view pipeline orchestrator."""
 
 import asyncio
 import logging
@@ -10,64 +10,70 @@ from rich.table import Table
 from tqdm import tqdm
 
 from src.cache.cache_manager import CacheManager
-from src.config import Config, load_seed_papers_config
-from src.embedding.clustering import PaperClusterer
+from src.config import Config
 from src.embedding.embedding_model import EmbeddingModel
+from src.embedding.kmeans_clustering import MultiViewKMeans
 from src.extraction.metadata_extractor import MetadataExtractor
 from src.extraction.pdf_extractor import PDFExtractor
+from src.extraction.section_extractor import SectionExtractor
+from src.extraction.section_splitter import split_sections
+from src.extraction.section_summarizer import SectionSummarizer
 from src.external.company_tiers import CompanyTiers
+from src.external.openalex import OpenAlexClient
 from src.external.semantic_scholar import SemanticScholarClient
 from src.external.university_rankings import UniversityRankings
-from src.models.paper import Author, Paper, PaperMetadata
+from src.models.paper import (
+    Author, PaperMetadata, PaperSections, SectionType, Paper,
+)
+from src.output.section_diagnostics_csv import write_section_diagnostics_csv
 from src.output.csv_writer import write_results_csv
-from src.output.file_organizer import organize_accepted_papers
 from src.scoring.affiliation_scorer import AffiliationScorer
-from src.scoring.aggregator import ScoreAggregator
 from src.scoring.citation_scorer import CitationScorer
-from src.scoring.relevance_scorer import RelevanceScorer
+from src.scoring.hindex_scorer import HIndexScorer
 
 logger = logging.getLogger(__name__)
 console = Console()
 
 
 class Pipeline:
-    """Orchestrates the full paper selection pipeline.
+    """Orchestrates the multi-view paper selection pipeline.
 
     Stages:
-        1. Discovery - find all PDFs
-        2. PDF text extraction
-        3. LLM metadata extraction
-        4. Embedding + clustering (if relevance enabled)
-        5. Affiliation scoring (if enabled)
-        6. Citation scoring (if enabled)
-        7. Aggregation & decision
-        8. Output
+        1.  Discovery — scan PDFs, create Paper objects
+        2.  Full-Text Extraction — extract all pages via PyMuPDF
+        3.  Metadata Extraction — title/abstract/authors/year via vLLM
+        4a. Section Splitting — heuristic regex-based splitting (instant)
+        4b. Section Summarization — LLM ~400-word summaries per section
+        5.  Multi-View Embedding — embed section summaries independently
+        6.  K-Means Clustering — K-Means per section view
+        7.  Scoring — h-index + affiliation + citation
+        8.  Output — CSV report with all raw signals
     """
 
     def __init__(self, config: Config):
         self.config = config
         self.cache = CacheManager(config.pipeline.cache_dir)
         self.papers: list[Paper] = []
-        self.seed_papers: list[Paper] = []
+        self.incomplete_papers: list[Paper] = []
 
     def run(self):
         """Execute the full pipeline."""
-        console.rule("[bold blue]AI Survey Paper Selection Pipeline")
+        console.rule("[bold blue]Multi-View Paper Selection Pipeline")
 
         self._stage1_discovery()
-        self._stage2_pdf_extraction()
+        self._stage2_full_text_extraction()
         asyncio.run(self._stage3_metadata_extraction())
+        self._stage4a_section_splitting()
+        asyncio.run(self._stage4b_section_summarization())
+        self._filter_incomplete_papers()
+        self._stage5_embedding()
+        self._stage6_kmeans_clustering()
 
-        if self.config.relevance.enabled:
-            self._stage4_embedding_clustering()
+        # Stage 7: global quality scores
+        self._stage7a_affiliation_scoring()
+        asyncio.run(self._stage7b_citation_scoring())
+        asyncio.run(self._stage7c_hindex_scoring())
 
-        if self.config.affiliation.enabled:
-            self._stage5_affiliation_scoring()
-
-        if self.config.citation.enabled:
-            asyncio.run(self._stage6_citation_scoring())
-
-        self._stage7_aggregation()
         self._stage8_output()
 
         self.cache.close()
@@ -78,14 +84,11 @@ class Pipeline:
     # -------------------------------------------------------------------------
 
     def _stage1_discovery(self):
-        """Scan for PDFs and load seed paper config."""
+        """Scan for PDFs and create Paper objects."""
         console.rule("[bold]Stage 1: Discovery")
 
         papers_dir = Path(self.config.pipeline.papers_dir)
-        seed_dir = Path(self.config.pipeline.seed_papers_dir)
-        seed_config = load_seed_papers_config(self.config.pipeline.seed_papers_config)
 
-        # Discover candidate papers
         if papers_dir.exists():
             for pdf_path in sorted(papers_dir.rglob("*.pdf")):
                 venue = pdf_path.parent.name if pdf_path.parent != papers_dir else "Unknown"
@@ -96,51 +99,57 @@ class Pipeline:
                     pdf_hash=pdf_hash,
                 ))
 
-        # Discover seed papers
-        if seed_dir.exists():
-            for pdf_path in sorted(seed_dir.rglob("*.pdf")):
-                pdf_hash = CacheManager.compute_pdf_hash(pdf_path)
-                label = seed_config.get(pdf_path.name)
-                self.seed_papers.append(Paper(
-                    pdf_path=pdf_path,
-                    venue="seed",
-                    pdf_hash=pdf_hash,
-                    is_seed=True,
-                    seed_label=label,
-                ))
-
         console.print(f"  Found {len(self.papers)} candidate papers")
-        console.print(f"  Found {len(self.seed_papers)} seed papers")
-        logger.info("Discovery: %d candidates, %d seeds", len(self.papers), len(self.seed_papers))
+        logger.info("Discovery: %d candidates", len(self.papers))
 
     # -------------------------------------------------------------------------
-    # Stage 2: PDF Text Extraction
+    # Stage 2: Full-Text Extraction
     # -------------------------------------------------------------------------
 
-    def _stage2_pdf_extraction(self):
-        """Extract first-page text from all PDFs."""
-        console.rule("[bold]Stage 2: PDF Text Extraction")
+    def _stage2_full_text_extraction(self):
+        """Extract full text from all PDFs."""
+        console.rule("[bold]Stage 2: Full-Text Extraction")
 
-        all_papers = self.seed_papers + self.papers
         skipped = 0
         extracted = 0
 
-        for paper in tqdm(all_papers, desc="Extracting PDF text"):
+        for paper in tqdm(self.papers, desc="Extracting full text"):
             # Check cache
-            cached_text = self.cache.get_pdf_text(paper.pdf_hash)
+            cached_text = self.cache.get_full_text(paper.pdf_hash)
             if cached_text is not None:
-                paper.first_page_text = cached_text
+                paper.full_text = cached_text
                 skipped += 1
                 continue
 
-            # Extract
-            text = PDFExtractor.extract_first_page(paper.pdf_path)
-            paper.first_page_text = text
-            self.cache.set_pdf_text(paper.pdf_hash, text)
+            # Extract full text
+            text = PDFExtractor.extract_full_text(paper.pdf_path)
+            paper.full_text = text
+            self.cache.set_full_text(paper.pdf_hash, text)
             extracted += 1
 
+            # Also extract first page for metadata extraction
+            if not paper.first_page_text:
+                cached_fp = self.cache.get_pdf_text(paper.pdf_hash)
+                if cached_fp is not None:
+                    paper.first_page_text = cached_fp
+                else:
+                    fp_text = PDFExtractor.extract_first_page(paper.pdf_path)
+                    paper.first_page_text = fp_text
+                    self.cache.set_pdf_text(paper.pdf_hash, fp_text)
+
+        # Fill first_page_text for cached full-text papers
+        for paper in self.papers:
+            if paper.first_page_text is None:
+                cached_fp = self.cache.get_pdf_text(paper.pdf_hash)
+                if cached_fp is not None:
+                    paper.first_page_text = cached_fp
+                else:
+                    fp_text = PDFExtractor.extract_first_page(paper.pdf_path)
+                    paper.first_page_text = fp_text
+                    self.cache.set_pdf_text(paper.pdf_hash, fp_text)
+
         console.print(f"  Extracted: {extracted}, Cached: {skipped}")
-        logger.info("PDF extraction: %d new, %d cached", extracted, skipped)
+        logger.info("Full-text extraction: %d new, %d cached", extracted, skipped)
 
     # -------------------------------------------------------------------------
     # Stage 3: LLM Metadata Extraction
@@ -155,11 +164,10 @@ class Pipeline:
             model_name=self.config.vllm.model_name,
         )
 
-        all_papers = self.seed_papers + self.papers
         to_extract = []
         skipped = 0
 
-        for paper in all_papers:
+        for paper in self.papers:
             cached = self.cache.get_metadata(paper.pdf_hash)
             if cached is not None:
                 authors = [Author(name=a["name"], affiliation=a.get("affiliation"))
@@ -203,96 +211,381 @@ class Pipeline:
                     failed += 1
 
             console.print(f"  Extracted: {success}, Failed: {failed}, Cached: {skipped}")
-            logger.info("Metadata extraction: %d success, %d failed, %d cached", success, failed, skipped)
+            logger.info("Metadata extraction: %d success, %d failed, %d cached",
+                        success, failed, skipped)
         else:
             console.print(f"  All {skipped} papers cached, no extraction needed")
-            logger.info("Metadata extraction: 0 new, %d cached", skipped)
 
     # -------------------------------------------------------------------------
-    # Stage 4: Embedding + Clustering
+    # Stage 4a: Heuristic Section Splitting
     # -------------------------------------------------------------------------
 
-    def _stage4_embedding_clustering(self):
-        """Compute embeddings and perform GMM clustering."""
-        console.rule("[bold]Stage 4: Embedding & Clustering")
+    # Minimum number of non-empty sections from heuristic split before
+    # falling back to LLM section-start detection.  Papers with fewer
+    # than 5 sections after summarization get filtered out, so use 5
+    # here to aggressively route incomplete splits to LLM fallback.
+    MIN_HEURISTIC_SECTIONS = 5
+
+    def _stage4a_section_splitting(self):
+        """Split full text into 5 sections using heuristic regex, with LLM fallback."""
+        console.rule("[bold]Stage 4a: Section Splitting (heuristic + LLM fallback)")
+
+        skipped = 0
+        heuristic_ok = 0
+        needs_llm = []
+
+        for paper in tqdm(self.papers, desc="Splitting sections"):
+            # Check cache
+            cached = self.cache.get_sections(paper.pdf_hash)
+            if cached is not None:
+                paper.sections = PaperSections(
+                    title_abstract_conclusion=cached.get("title_abstract_conclusion", ""),
+                    introduction=cached.get("introduction", ""),
+                    related_work=cached.get("related_work", ""),
+                    method=cached.get("method", ""),
+                    experiments=cached.get("experiments", ""),
+                )
+                skipped += 1
+                continue
+
+            # Heuristic split — instant, no LLM
+            paper.sections = split_sections(paper.full_text or "")
+
+            # Count non-empty sections
+            section_names = [
+                "title_abstract_conclusion", "introduction",
+                "related_work", "method", "experiments",
+            ]
+            n_populated = sum(
+                1 for name in section_names
+                if (getattr(paper.sections, name, "") or "").strip()
+            )
+
+            if n_populated >= self.MIN_HEURISTIC_SECTIONS:
+                heuristic_ok += 1
+                self._cache_sections(paper)
+            else:
+                needs_llm.append(paper)
+                logger.info(
+                    "Paper '%s' has only %d/5 heuristic sections, queuing LLM fallback",
+                    paper.title or paper.pdf_path.name, n_populated,
+                )
+
+        console.print(
+            f"  Heuristic OK: {heuristic_ok}, Need LLM fallback: {len(needs_llm)}, "
+            f"Cached: {skipped}"
+        )
+
+        # LLM fallback for papers with too few heuristic sections
+        if needs_llm:
+            console.print(f"  Running LLM section-start detection for {len(needs_llm)} papers...")
+            asyncio.run(self._llm_section_fallback(needs_llm))
+
+        logger.info(
+            "Section splitting: %d heuristic, %d LLM fallback, %d cached",
+            heuristic_ok, len(needs_llm), skipped,
+        )
+
+    async def _llm_section_fallback(self, papers: list[Paper]):
+        """Use LLM section-start detection for papers where heuristic failed."""
+        sec_cfg = self.config.section_extraction
+        extractor = SectionExtractor(
+            base_url=self.config.vllm.base_url,
+            model_name=self.config.vllm.model_name,
+            max_concurrent=sec_cfg.max_concurrent,
+            temperature=sec_cfg.temperature,
+            max_tokens=sec_cfg.max_tokens,
+            max_text_chars=sec_cfg.max_text_chars,
+        )
+
+        texts = [(p.pdf_hash, p.full_text or "") for p in papers]
+        results = await extractor.extract_batch(texts)
+
+        for paper in papers:
+            llm_sections = results.get(paper.pdf_hash)
+            if llm_sections:
+                # Merge: use LLM result for sections that heuristic missed
+                section_names = [
+                    "title_abstract_conclusion", "introduction",
+                    "related_work", "method", "experiments",
+                ]
+                for name in section_names:
+                    heuristic_text = getattr(paper.sections, name, "") or ""
+                    llm_text = getattr(llm_sections, name, "") or ""
+                    # Use LLM result if heuristic section is empty
+                    if not heuristic_text.strip() and llm_text.strip():
+                        setattr(paper.sections, name, llm_text)
+
+            self._cache_sections(paper)
+
+    def _cache_sections(self, paper: Paper):
+        """Cache a paper's sections."""
+        self.cache.set_sections(
+            paper.pdf_hash,
+            paper.sections.title_abstract_conclusion or "",
+            paper.sections.introduction or "",
+            paper.sections.related_work or "",
+            paper.sections.method or "",
+            paper.sections.experiments or "",
+        )
+
+    # -------------------------------------------------------------------------
+    # Stage 4b: LLM Section Summarization
+    # -------------------------------------------------------------------------
+
+    async def _stage4b_section_summarization(self):
+        """Summarize each section (~200 words) using vLLM for embedding."""
+        console.rule("[bold]Stage 4b: LLM Section Summarization")
+
+        sec_cfg = self.config.section_extraction
+        summarizer = SectionSummarizer(
+            base_url=self.config.vllm.base_url,
+            model_name=self.config.vllm.model_name,
+            max_concurrent=sec_cfg.max_concurrent,
+            temperature=sec_cfg.temperature,
+            max_tokens=1024,
+        )
+
+        section_names = [
+            "title_abstract_conclusion", "introduction",
+            "related_work", "method", "experiments",
+        ]
+        section_type_map = {
+            "title_abstract_conclusion": SectionType.TITLE_ABSTRACT_CONCLUSION,
+            "introduction": SectionType.INTRODUCTION,
+            "related_work": SectionType.RELATED_WORK,
+            "method": SectionType.METHOD,
+            "experiments": SectionType.EXPERIMENTS,
+        }
+
+        to_summarize = []
+        skipped = 0
+
+        for paper in self.papers:
+            cached = self.cache.get_section_summaries(paper.pdf_hash)
+            if cached is not None:
+                for name in section_names:
+                    st = section_type_map[name]
+                    summary = cached.get(name, "")
+                    if summary:
+                        paper.section_summaries[st.value] = summary
+                skipped += 1
+            else:
+                to_summarize.append(paper)
+
+        console.print(f"  Need summarization: {len(to_summarize)}, Cached: {skipped}")
+
+        if to_summarize:
+            # Build batch: (pdf_hash, {section_name: raw_text})
+            batch = []
+            for paper in to_summarize:
+                sections_dict = {}
+                if paper.sections:
+                    for name in section_names:
+                        text = getattr(paper.sections, name, "") or ""
+                        if text.strip():
+                            sections_dict[name] = text
+                batch.append((paper.pdf_hash, sections_dict))
+
+            results = await summarizer.summarize_batch(batch)
+
+            success = 0
+            for paper in to_summarize:
+                summaries = results.get(paper.pdf_hash, {})
+                for name in section_names:
+                    st = section_type_map[name]
+                    summary = summaries.get(name, "")
+                    if summary:
+                        paper.section_summaries[st.value] = summary
+
+                # Cache
+                self.cache.set_section_summaries(
+                    paper.pdf_hash,
+                    summaries.get("title_abstract_conclusion", ""),
+                    summaries.get("introduction", ""),
+                    summaries.get("related_work", ""),
+                    summaries.get("method", ""),
+                    summaries.get("experiments", ""),
+                )
+
+                n_summaries = sum(1 for name in section_names if summaries.get(name))
+                if n_summaries > 0:
+                    success += 1
+
+            console.print(f"  Summarized: {success}/{len(to_summarize)} papers")
+            logger.info("Section summarization: %d success, %d cached",
+                        success, skipped)
+        else:
+            console.print(f"  All {skipped} papers cached, no summarization needed")
+
+        # Write section diagnostics CSV for verification (all papers,
+        # including those that will be filtered for incomplete sections)
+        output_dir = Path(self.config.pipeline.output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        diag_path = output_dir / "section_diagnostics.csv"
+        write_section_diagnostics_csv(self.papers, diag_path)
+        console.print(f"  Section diagnostics written to {diag_path}")
+
+    # -------------------------------------------------------------------------
+    # Section Completeness Filter
+    # -------------------------------------------------------------------------
+
+    def _filter_incomplete_papers(self):
+        """Remove papers with missing section summaries from the active list.
+
+        Papers that don't have summaries for all enabled views are moved to
+        self.incomplete_papers and excluded from downstream stages.
+        """
+        console.rule("[bold]Section Completeness Filter")
+
+        enabled_views = self.config.kmeans.enabled_views
+        required_count = len(enabled_views)
+        complete = []
+        incomplete = []
+
+        for paper in self.papers:
+            n_summaries = sum(
+                1 for v in enabled_views
+                if paper.section_summaries.get(v, "").strip()
+            )
+            if n_summaries >= required_count:
+                complete.append(paper)
+            else:
+                incomplete.append(paper)
+
+        self.incomplete_papers.extend(incomplete)
+        self.papers = complete
+
+        console.print(
+            f"  Complete: {len(complete)}, "
+            f"Incomplete (removed): {len(incomplete)}"
+        )
+        if incomplete:
+            for p in incomplete[:5]:
+                title = (p.title or p.pdf_path.name)[:60]
+                n = sum(1 for v in enabled_views
+                        if p.section_summaries.get(v, "").strip())
+                console.print(f"    - {title} ({n}/5 summaries)")
+            if len(incomplete) > 5:
+                console.print(f"    ... and {len(incomplete) - 5} more")
+
+        logger.info("Section filter: %d complete, %d incomplete (removed)",
+                     len(complete), len(incomplete))
+
+    # -------------------------------------------------------------------------
+    # Stage 5: Section Embedding
+    # -------------------------------------------------------------------------
+
+    def _stage5_embedding(self):
+        """Embed each section summary independently."""
+        console.rule("[bold]Stage 5: Section Embedding")
 
         model = EmbeddingModel(
             model_name=self.config.embedding.model_name,
             device=self.config.embedding.device,
             batch_size=self.config.embedding.batch_size,
         )
-
-        all_papers = self.seed_papers + self.papers
         model_name = self.config.embedding.model_name
+        enabled_views = self.config.kmeans.enabled_views
 
-        # Collect texts and check cache
-        texts_to_embed = []
-        indices_to_embed = []
+        CACHE_KEY_PREFIX = f"{model_name}__summary_v2_view_"
 
-        for i, paper in enumerate(all_papers):
-            cached = self.cache.get_embedding(paper.pdf_hash, model_name)
-            if cached is not None:
-                paper.embedding = cached.tolist()
-            else:
-                text = paper.embedding_text
-                if text:
-                    texts_to_embed.append(text)
-                    indices_to_embed.append(i)
+        for view in enabled_views:
+            section_type = SectionType(view)
+            view_model_key = f"{CACHE_KEY_PREFIX}{view}"
 
-        console.print(f"  Need embedding: {len(texts_to_embed)}, "
-                       f"Cached: {len(all_papers) - len(texts_to_embed)}")
+            texts_to_embed = []
+            indices_to_embed = []
 
-        # Compute new embeddings
-        if texts_to_embed:
-            embeddings = model.embed(texts_to_embed)
-            for idx, emb in zip(indices_to_embed, embeddings):
-                all_papers[idx].embedding = emb.tolist()
-                self.cache.set_embedding(
-                    all_papers[idx].pdf_hash, emb, model_name
-                )
+            for i, paper in enumerate(self.papers):
+                cached = self.cache.get_embedding(paper.pdf_hash, view_model_key)
+                if cached is not None:
+                    paper.section_embeddings[view] = cached.tolist()
+                else:
+                    text = paper.section_summaries.get(view, "")
+                    if not text or len(text.strip()) < 20:
+                        if paper.sections:
+                            text = paper.sections.get_section(section_type) or ""
+                    if not text or len(text.strip()) < 20:
+                        text = paper.embedding_text or ""
+                    if text and len(text.strip()) >= 20:
+                        texts_to_embed.append(text)
+                        indices_to_embed.append(i)
 
-        # Build embedding matrix for clustering
-        valid_papers = [p for p in all_papers if p.embedding is not None]
-        if not valid_papers:
-            console.print("  [red]No papers with valid embeddings, skipping clustering")
-            return
+            cached_count = len(self.papers) - len(texts_to_embed)
+            console.print(f"  View {view} ({section_type.name}): "
+                          f"embed {len(texts_to_embed)}, cached {cached_count}")
 
-        embedding_matrix = np.array([p.embedding for p in valid_papers], dtype=np.float32)
+            if texts_to_embed:
+                embeddings = model.embed(texts_to_embed)
+                for idx, emb in zip(indices_to_embed, embeddings):
+                    self.papers[idx].section_embeddings[view] = emb.tolist()
+                    self.cache.set_embedding(
+                        self.papers[idx].pdf_hash, emb, view_model_key
+                    )
 
-        # Identify seed paper indices and labels in the valid set
-        seed_indices = []
-        seed_labels = []
-        for i, p in enumerate(valid_papers):
-            if p.is_seed and p.seed_label:
-                seed_indices.append(i)
-                seed_labels.append(p.seed_label)
+    # -------------------------------------------------------------------------
+    # Stage 6: Multi-View K-Means Clustering
+    # -------------------------------------------------------------------------
 
-        # Cluster
-        clusterer = PaperClusterer(
-            n_clusters=self.config.clustering.n_clusters,
+    def _stage6_kmeans_clustering(self):
+        """Run independent K-Means per section view."""
+        console.rule("[bold]Stage 6: Multi-View K-Means Clustering")
+
+        pca = self.config.kmeans.pca_components or None
+        kmeans = MultiViewKMeans(
+            n_clusters=self.config.kmeans.n_clusters,
+            n_init=self.config.kmeans.n_init,
+            random_state=self.config.kmeans.random_state,
+            weak_member_percentile=self.config.kmeans.weak_member_percentile,
+            pca_components=pca,
         )
-        result = clusterer.fit_predict(embedding_matrix, seed_indices, seed_labels)
 
-        # Apply relevance scores
-        relevance_scores = RelevanceScorer.score(result.cluster_probabilities)
+        enabled_views = self.config.kmeans.enabled_views
 
-        for i, paper in enumerate(valid_papers):
-            paper.scores.cluster_id = int(result.cluster_ids[i])
-            paper.scores.cluster_label = result.cluster_labels.get(
-                int(result.cluster_ids[i]), "Unknown"
+        for view in enabled_views:
+            valid_indices = [
+                i for i, p in enumerate(self.papers)
+                if view in p.section_embeddings
+            ]
+
+            if not valid_indices:
+                console.print(f"  [yellow]View {view}: no valid embeddings, skipping")
+                continue
+
+            embeddings = np.array(
+                [self.papers[i].section_embeddings[view] for i in valid_indices],
+                dtype=np.float32,
             )
-            paper.scores.relevance_score = relevance_scores[i]
 
-        console.print(f"  Clustered {len(valid_papers)} papers into "
-                       f"{len(result.cluster_labels)} clusters")
+            result = kmeans.fit_predict(embeddings, view)
+
+            # Store per-view cluster assignments
+            for j, paper_idx in enumerate(valid_indices):
+                paper = self.papers[paper_idx]
+                paper.scores.cluster_ids[view] = int(result.cluster_ids[j])
+                paper.scores.centroid_distances[view] = float(result.centroid_distances[j])
+                paper.scores.weak_member[view] = bool(result.weak_members[j])
+
+            from collections import Counter
+            sizes = Counter(int(result.cluster_ids[j]) for j in range(len(valid_indices)))
+            console.print(
+                f"  View {view}: {len(valid_indices)} papers → "
+                f"{result.n_clusters} clusters  "
+                f"(sizes: {sorted(sizes.values(), reverse=True)})"
+            )
 
     # -------------------------------------------------------------------------
-    # Stage 5: Affiliation Scoring
+    # Stage 7: Scoring (affiliation + citation + h-index)
     # -------------------------------------------------------------------------
 
-    def _stage5_affiliation_scoring(self):
+    def _stage7a_affiliation_scoring(self):
         """Score papers based on author affiliations."""
-        console.rule("[bold]Stage 5: Affiliation Scoring")
+        console.rule("[bold]Stage 7a: Affiliation Scoring")
+
+        if not self.config.affiliation.enabled:
+            console.print("  [yellow]Affiliation scoring disabled")
+            return
 
         uni_rankings = UniversityRankings(self.config.affiliation.university_rankings_path)
         company_tiers = CompanyTiers(self.config.affiliation.company_tiers_path)
@@ -305,29 +598,50 @@ class Pipeline:
         )
 
         for paper in self.papers:
-            paper.scores.affiliation_score = scorer.score(
-                paper.first_author, paper.last_author
+            paper.scores.first_author_affiliation_score = scorer.score_author(
+                paper.first_author
+            )
+            paper.scores.last_author_affiliation_score = scorer.score_author(
+                paper.last_author
             )
 
-        scores = [p.scores.affiliation_score for p in self.papers
-                   if p.scores.affiliation_score is not None]
-        if scores:
-            console.print(f"  Affiliation scores: min={min(scores):.3f}, "
-                           f"max={max(scores):.3f}, mean={sum(scores)/len(scores):.3f}")
+        scored = sum(1 for p in self.papers
+                     if p.scores.first_author_affiliation_score is not None)
+        console.print(f"  Scored {scored}/{len(self.papers)} papers with affiliation data")
 
-    # -------------------------------------------------------------------------
-    # Stage 6: Citation Scoring
-    # -------------------------------------------------------------------------
-
-    async def _stage6_citation_scoring(self):
+    async def _stage7b_citation_scoring(self):
         """Fetch citations and score papers."""
-        console.rule("[bold]Stage 6: Citation + Recency Scoring")
+        console.rule("[bold]Stage 7b: Citation Scoring")
 
-        client = SemanticScholarClient(
-            api_key=self.config.citation.semantic_scholar_api_key,
-            rate_limit_rps=self.config.citation.rate_limit_rps,
-            max_retries=self.config.citation.max_retries,
-        )
+        if not self.config.citation.enabled:
+            console.print("  [yellow]Citation scoring disabled")
+            return
+
+        source = self.config.citation.source
+        fallback_client = None
+
+        if source == "openalex":
+            client = OpenAlexClient(
+                api_key=self.config.citation.openalex_api_key,
+                email=self.config.citation.openalex_email,
+                rate_limit_rps=self.config.citation.rate_limit_rps,
+                max_retries=self.config.citation.max_retries,
+            )
+            # Use Semantic Scholar as fallback — it merges preprint/published
+            # records and often has higher citation counts.
+            fallback_client = SemanticScholarClient(
+                api_key=self.config.citation.semantic_scholar_api_key,
+                rate_limit_rps=self.config.hindex.rate_limit_rps,  # S2 rate
+                max_retries=self.config.citation.max_retries,
+            )
+            console.print("  Using OpenAlex + Semantic Scholar fallback for citation data")
+        else:
+            client = SemanticScholarClient(
+                api_key=self.config.citation.semantic_scholar_api_key,
+                rate_limit_rps=self.config.citation.rate_limit_rps,
+                max_retries=self.config.citation.max_retries,
+            )
+            console.print("  Using Semantic Scholar API for citation data")
 
         scorer = CitationScorer(
             client=client,
@@ -335,52 +649,125 @@ class Pipeline:
             expected_citations=self.config.citation.expected_citations,
             expected_citations_slope=self.config.citation.expected_citations_slope,
             cache_max_age_days=self.config.citation.cache_max_age_days,
+            fallback_client=fallback_client,
         )
 
         try:
             results = await scorer.score_batch(self.papers)
 
             for paper, (score, count) in zip(self.papers, results):
-                paper.scores.citation_score = score
                 paper.scores.citation_count = count
 
             scored = sum(1 for s, _ in results if s is not None)
             console.print(f"  Scored {scored}/{len(self.papers)} papers with citation data")
+        finally:
+            await client.close()
+            if fallback_client:
+                await fallback_client.close()
+
+    async def _stage7c_hindex_scoring(self):
+        """Fetch author h-indices and score papers."""
+        console.rule("[bold]Stage 7c: H-Index Scoring")
+
+        if not self.config.hindex.enabled:
+            console.print("  [yellow]H-index scoring disabled")
+            return
+
+        # Use OpenAlex for h-index data (10 RPS vs S2's 1 RPS)
+        client = OpenAlexClient(
+            api_key=self.config.citation.openalex_api_key,
+            email=self.config.citation.openalex_email,
+            rate_limit_rps=self.config.citation.rate_limit_rps,
+            max_retries=self.config.citation.max_retries,
+        )
+
+        scorer = HIndexScorer(
+            client=client,
+            cache=self.cache,
+            max_hindex_baseline=self.config.hindex.max_hindex_baseline,
+            default_score=self.config.hindex.default_score,
+            cache_max_age_days=self.config.hindex.cache_max_age_days,
+        )
+
+        try:
+            # Build papers_data, reusing paper_ids from citation cache (stage 7b)
+            papers_data = []
+            from_cache = 0
+            need_lookup = []
+
+            for i, paper in enumerate(self.papers):
+                title = paper.title or ""
+                paper_id = None
+                if title:
+                    cached = self.cache.get_citation(
+                        title, self.config.citation.cache_max_age_days
+                    )
+                    if cached and cached.get("paper_id"):
+                        paper_id = cached["paper_id"]
+                        from_cache += 1
+                    else:
+                        need_lookup.append(i)
+                papers_data.append((title, paper_id))
+
+            console.print(
+                f"  Paper IDs: {from_cache} from citation cache, "
+                f"{len(need_lookup)} need lookup"
+            )
+
+            # Look up missing paper_ids via OpenAlex
+            if need_lookup:
+                async def _fetch_paper_id(idx: int, title: str):
+                    result = await client.search_paper(title)
+                    if result and result.paper_id:
+                        return idx, title, result.paper_id
+                    return idx, title, None
+
+                id_tasks = [
+                    _fetch_paper_id(i, self.papers[i].title)
+                    for i in need_lookup
+                    if self.papers[i].title
+                ]
+                id_results = await asyncio.gather(*id_tasks, return_exceptions=True)
+                found = 0
+                for r in id_results:
+                    if isinstance(r, Exception):
+                        logger.error("Paper ID lookup failed: %s", r)
+                        continue
+                    idx, title, paper_id = r
+                    if paper_id:
+                        papers_data[idx] = (title, paper_id)
+                        found += 1
+                console.print(f"  Looked up {found}/{len(need_lookup)} paper IDs via OpenAlex")
+
+            results = await scorer.score_batch(papers_data)
+
+            for paper, (_score, max_hindex) in zip(self.papers, results):
+                paper.scores.max_hindex = max_hindex
+
+            scored = sum(1 for s, h in results if h is not None)
+            console.print(f"  Scored {scored}/{len(self.papers)} papers with h-index data")
 
         finally:
             await client.close()
-
-    # -------------------------------------------------------------------------
-    # Stage 7: Aggregation
-    # -------------------------------------------------------------------------
-
-    def _stage7_aggregation(self):
-        """Apply threshold-based acceptance decisions."""
-        console.rule("[bold]Stage 7: Aggregation & Decision")
-
-        aggregator = ScoreAggregator(self.config)
-        aggregator.decide_all(self.papers)
-
-        accepted = sum(1 for p in self.papers if p.accepted)
-        console.print(f"  Accepted: {accepted}/{len(self.papers)} papers")
 
     # -------------------------------------------------------------------------
     # Stage 8: Output
     # -------------------------------------------------------------------------
 
     def _stage8_output(self):
-        """Generate CSV report and organize accepted papers."""
-        console.rule("[bold]Stage 8: Output")
+        """Generate CSV reports with local and global scores."""
+        console.rule("[bold]Stage 9: Output")
 
         output_dir = Path(self.config.pipeline.output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Write CSV
+        # Write main results CSV
+        all_papers = self.papers + self.incomplete_papers
         csv_path = output_dir / "results.csv"
-        write_results_csv(self.papers, csv_path)
-
-        # Copy accepted papers
-        copied = organize_accepted_papers(self.papers, output_dir)
+        write_results_csv(all_papers, csv_path)
+        console.print(f"  Wrote results to {csv_path} "
+                       f"({len(self.papers)} complete + "
+                       f"{len(self.incomplete_papers)} incomplete)")
 
         # Print summary
         self._print_summary()
@@ -391,42 +778,31 @@ class Pipeline:
         table.add_column("Metric", style="cyan")
         table.add_column("Value", style="green")
 
-        total = len(self.papers)
-        accepted = sum(1 for p in self.papers if p.accepted)
-        rejected = total - accepted
+        total = len(self.papers) + len(self.incomplete_papers)
+        incomplete = len(self.incomplete_papers)
 
         table.add_row("Total candidates", str(total))
-        table.add_row("Seed papers", str(len(self.seed_papers)))
-        table.add_row("Accepted", str(accepted))
-        table.add_row("Rejected", str(rejected))
+        table.add_row("Scored", str(len(self.papers)))
+        table.add_row("Incomplete (filtered)", str(incomplete))
 
-        if total > 0:
-            table.add_row("Acceptance rate", f"{100 * accepted / total:.1f}%")
+        # H-index summary
+        hindices = [p.scores.max_hindex for p in self.papers
+                    if p.scores.max_hindex is not None]
+        if hindices:
+            table.add_row("---", "---")
+            table.add_row("[bold]Max H-Index", "")
+            table.add_row("  Min", str(min(hindices)))
+            table.add_row("  Max", str(max(hindices)))
+            table.add_row("  Mean", f"{sum(hindices)/len(hindices):.1f}")
 
-        # Cluster distribution
-        if self.config.relevance.enabled:
-            cluster_counts: dict[str, int] = {}
-            for p in self.papers:
-                if p.accepted and p.scores.cluster_label:
-                    label = p.scores.cluster_label
-                    cluster_counts[label] = cluster_counts.get(label, 0) + 1
-            if cluster_counts:
-                table.add_row("---", "---")
-                table.add_row("[bold]Cluster Distribution", "[bold]Accepted")
-                for label, count in sorted(cluster_counts.items(), key=lambda x: -x[1]):
-                    table.add_row(f"  {label}", str(count))
-
-        # Score summaries
-        for name, attr in [("Relevance", "relevance_score"),
-                           ("Affiliation", "affiliation_score"),
-                           ("Citation", "citation_score")]:
-            scores = [getattr(p.scores, attr) for p in self.papers
-                      if getattr(p.scores, attr) is not None]
-            if scores:
-                table.add_row("---", "---")
-                table.add_row(f"[bold]{name} scores", "")
-                table.add_row(f"  Min", f"{min(scores):.3f}")
-                table.add_row(f"  Max", f"{max(scores):.3f}")
-                table.add_row(f"  Mean", f"{sum(scores)/len(scores):.3f}")
+        # Citation summary
+        citations = [p.scores.citation_count for p in self.papers
+                     if p.scores.citation_count is not None]
+        if citations:
+            table.add_row("---", "---")
+            table.add_row("[bold]Citation Count", "")
+            table.add_row("  Min", str(min(citations)))
+            table.add_row("  Max", str(max(citations)))
+            table.add_row("  Mean", f"{sum(citations)/len(citations):.1f}")
 
         console.print(table)

@@ -57,6 +57,49 @@ class CacheManager:
                 title TEXT PRIMARY KEY,
                 citation_count INTEGER,
                 year INTEGER,
+                paper_id TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        # Migration: add paper_id column if missing (existing databases)
+        try:
+            cur.execute("ALTER TABLE citations ADD COLUMN paper_id TEXT")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS full_text (
+                pdf_hash TEXT PRIMARY KEY,
+                text_content TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS sections (
+                pdf_hash TEXT PRIMARY KEY,
+                title_abstract_conclusion TEXT,
+                introduction TEXT,
+                related_work TEXT,
+                method TEXT,
+                experiments TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS author_hindex (
+                paper_title TEXT PRIMARY KEY,
+                authors_json TEXT,
+                max_hindex INTEGER,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS section_summaries (
+                pdf_hash TEXT PRIMARY KEY,
+                title_abstract_conclusion TEXT,
+                introduction TEXT,
+                related_work TEXT,
+                method TEXT,
+                experiments TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
             )
         """)
@@ -138,7 +181,7 @@ class CacheManager:
 
     def get_citation(self, title: str, max_age_days: int = 30) -> Optional[dict]:
         cur = self.conn.execute(
-            "SELECT citation_count, year, created_at FROM citations WHERE title = ?",
+            "SELECT citation_count, year, paper_id, created_at FROM citations WHERE title = ?",
             (title,),
         )
         row = cur.fetchone()
@@ -148,13 +191,119 @@ class CacheManager:
         age_days = (datetime.now() - created).days
         if age_days > max_age_days:
             return None
-        return {"citation_count": row["citation_count"], "year": row["year"]}
+        return {
+            "citation_count": row["citation_count"],
+            "year": row["year"],
+            "paper_id": row["paper_id"],
+        }
 
-    def set_citation(self, title: str, citation_count: int, year: Optional[int]):
+    def set_citation(self, title: str, citation_count: int,
+                     year: Optional[int], paper_id: Optional[str] = None):
         self.conn.execute(
-            "INSERT OR REPLACE INTO citations (title, citation_count, year, created_at) "
-            "VALUES (?, ?, ?, ?)",
-            (title, citation_count, year, datetime.now().isoformat()),
+            "INSERT OR REPLACE INTO citations (title, citation_count, year, paper_id, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (title, citation_count, year, paper_id, datetime.now().isoformat()),
+        )
+        self.conn.commit()
+
+    # -- Full text cache --
+
+    def get_full_text(self, pdf_hash: str) -> Optional[str]:
+        cur = self.conn.execute(
+            "SELECT text_content FROM full_text WHERE pdf_hash = ?", (pdf_hash,)
+        )
+        row = cur.fetchone()
+        return row["text_content"] if row else None
+
+    def set_full_text(self, pdf_hash: str, text: str):
+        self.conn.execute(
+            "INSERT OR REPLACE INTO full_text (pdf_hash, text_content) VALUES (?, ?)",
+            (pdf_hash, text),
+        )
+        self.conn.commit()
+
+    # -- Sections cache --
+
+    def get_sections(self, pdf_hash: str) -> Optional[dict]:
+        cur = self.conn.execute(
+            "SELECT title_abstract_conclusion, introduction, related_work, method, experiments "
+            "FROM sections WHERE pdf_hash = ?",
+            (pdf_hash,),
+        )
+        row = cur.fetchone()
+        if row is None:
+            return None
+        return {
+            "title_abstract_conclusion": row["title_abstract_conclusion"],
+            "introduction": row["introduction"],
+            "related_work": row["related_work"],
+            "method": row["method"],
+            "experiments": row["experiments"],
+        }
+
+    def set_sections(self, pdf_hash: str, title_abstract_conclusion: str,
+                     introduction: str, related_work: str,
+                     method: str, experiments: str):
+        self.conn.execute(
+            "INSERT OR REPLACE INTO sections "
+            "(pdf_hash, title_abstract_conclusion, introduction, related_work, method, experiments) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (pdf_hash, title_abstract_conclusion, introduction, related_work, method, experiments),
+        )
+        self.conn.commit()
+
+    # -- Section summaries cache --
+
+    def get_section_summaries(self, pdf_hash: str) -> Optional[dict]:
+        cur = self.conn.execute(
+            "SELECT title_abstract_conclusion, introduction, related_work, method, experiments "
+            "FROM section_summaries WHERE pdf_hash = ?",
+            (pdf_hash,),
+        )
+        row = cur.fetchone()
+        if row is None:
+            return None
+        return {
+            "title_abstract_conclusion": row["title_abstract_conclusion"],
+            "introduction": row["introduction"],
+            "related_work": row["related_work"],
+            "method": row["method"],
+            "experiments": row["experiments"],
+        }
+
+    def set_section_summaries(self, pdf_hash: str, title_abstract_conclusion: str,
+                              introduction: str, related_work: str,
+                              method: str, experiments: str):
+        self.conn.execute(
+            "INSERT OR REPLACE INTO section_summaries "
+            "(pdf_hash, title_abstract_conclusion, introduction, related_work, method, experiments) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (pdf_hash, title_abstract_conclusion, introduction, related_work, method, experiments),
+        )
+        self.conn.commit()
+
+    # -- Author h-index cache --
+
+    def get_author_hindex(self, paper_title: str, max_age_days: int = 30) -> Optional[dict]:
+        cur = self.conn.execute(
+            "SELECT authors_json, max_hindex, created_at FROM author_hindex WHERE paper_title = ?",
+            (paper_title,),
+        )
+        row = cur.fetchone()
+        if row is None:
+            return None
+        created = datetime.fromisoformat(row["created_at"])
+        age_days = (datetime.now() - created).days
+        if age_days > max_age_days:
+            return None
+        authors = json.loads(row["authors_json"]) if row["authors_json"] else []
+        return {"authors": authors, "max_hindex": row["max_hindex"]}
+
+    def set_author_hindex(self, paper_title: str, authors: list[dict], max_hindex: int):
+        self.conn.execute(
+            "INSERT OR REPLACE INTO author_hindex "
+            "(paper_title, authors_json, max_hindex, created_at) VALUES (?, ?, ?, ?)",
+            (paper_title, json.dumps(authors), max_hindex, datetime.now().isoformat()),
         )
         self.conn.commit()
 

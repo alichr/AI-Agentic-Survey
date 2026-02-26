@@ -139,4 +139,9 @@ class MetadataExtractor:
             pdf_hash, metadata = r
             output[pdf_hash] = metadata
 
+        await self.close()
         return output
+
+    async def close(self):
+        """Close the underlying HTTP client to avoid event-loop-closed errors."""
+        await self.client.close()

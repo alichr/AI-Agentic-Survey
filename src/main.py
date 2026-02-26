@@ -1,4 +1,4 @@
-"""Entry point for the AI Survey Paper Selection Pipeline."""
+"""Entry point for the Multi-View Paper Selection Pipeline."""
 
 import argparse
 import logging
@@ -20,8 +20,9 @@ def setup_logging(level: str):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="AI Survey Paper Selection Pipeline - "
-                    "Automatically select relevant papers for an Agentic AI survey.",
+        description="Multi-View Paper Selection Pipeline - "
+                    "Select relevant papers using multi-view K-Means clustering "
+                    "and consensus fusion.",
     )
     parser.add_argument(
         "--config", "-c",
@@ -42,9 +43,9 @@ def main():
         help="Override log level from config",
     )
     parser.add_argument(
-        "--no-relevance",
+        "--no-hindex",
         action="store_true",
-        help="Disable relevance scoring",
+        help="Disable h-index scoring",
     )
     parser.add_argument(
         "--no-affiliation",
@@ -59,9 +60,8 @@ def main():
     parser.add_argument(
         "--n-clusters",
         type=int,
-        help="Number of GMM clusters (default: from config, typically 10)",
+        help="Number of K-Means clusters (default: from config, typically 10)",
     )
-
     args = parser.parse_args()
 
     # Load config
@@ -74,14 +74,14 @@ def main():
         config.pipeline.output_dir = args.output_dir
     if args.log_level:
         config.pipeline.log_level = args.log_level
-    if args.no_relevance:
-        config.relevance.enabled = False
+    if args.no_hindex:
+        config.hindex.enabled = False
     if args.no_affiliation:
         config.affiliation.enabled = False
     if args.no_citation:
         config.citation.enabled = False
     if args.n_clusters:
-        config.clustering.n_clusters = args.n_clusters
+        config.kmeans.n_clusters = args.n_clusters
 
     # Setup logging
     setup_logging(config.pipeline.log_level)

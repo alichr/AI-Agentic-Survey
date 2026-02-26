@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.cache.cache_manager import CacheManager
-from src.external.semantic_scholar import CitationData, SemanticScholarClient
+from src.external.semantic_scholar import CitationData
 from src.models.paper import Author, Paper, PaperMetadata, PaperScores
 from src.scoring.citation_scorer import CitationScorer
 
@@ -14,7 +14,8 @@ from src.scoring.citation_scorer import CitationScorer
 @pytest.fixture
 def scorer_deps(tmp_path):
     """Create a CitationScorer with mock client and real cache."""
-    mock_client = AsyncMock(spec=SemanticScholarClient)
+    mock_client = AsyncMock()
+    mock_client.search_paper = AsyncMock()
     cache = CacheManager(str(tmp_path / "cache"))
     expected_citations = {0: 5, 1: 15, 2: 40, 3: 80, 4: 120, 5: 160}
     scorer = CitationScorer(

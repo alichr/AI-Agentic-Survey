@@ -7,15 +7,15 @@ import yaml
 from src.config import (
     AffiliationConfig,
     CitationConfig,
-    ClusteringConfig,
     Config,
     EmbeddingConfig,
+    HIndexConfig,
+    KMeansClusteringConfig,
     PipelineConfig,
-    RelevanceConfig,
+    SectionExtractionConfig,
     VLLMConfig,
     _dict_to_dataclass,
     load_config,
-    load_seed_papers_config,
 )
 
 
@@ -36,16 +36,16 @@ class TestDictToDataclass:
         assert not hasattr(result, "unknown_key")
 
     def test_empty_dict_returns_defaults(self):
-        result = _dict_to_dataclass(RelevanceConfig, {})
-        assert result.enabled is True
-        assert result.threshold == 0.3
+        result = _dict_to_dataclass(KMeansClusteringConfig, {})
+        assert result.n_clusters == 10
+        assert result.pca_components == 50
 
 
 class TestLoadConfig:
     def test_valid_yaml(self, tmp_path):
         config_data = {
             "pipeline": {"papers_dir": "/test/papers", "log_level": "DEBUG"},
-            "relevance": {"threshold": 0.5},
+            "embedding": {"model_name": "Qwen/Qwen3-Embedding-4B"},
         }
         cfg_path = tmp_path / "config.yaml"
         cfg_path.write_text(yaml.dump(config_data))
@@ -53,9 +53,14 @@ class TestLoadConfig:
         config = load_config(str(cfg_path))
         assert config.pipeline.papers_dir == "/test/papers"
         assert config.pipeline.log_level == "DEBUG"
-        assert config.relevance.threshold == 0.5
-        # Other sections should have defaults
-        assert config.embedding.model_name == "Qwen/Qwen3-Embedding-0.6B"
+        assert config.embedding.model_name == "Qwen/Qwen3-Embedding-4B"
+
+    def test_citation_config_defaults(self, tmp_path):
+        config = load_config(str(tmp_path / "nonexistent.yaml"))
+        assert config.citation.source == "openalex"
+        assert config.citation.openalex_api_key is None
+        assert config.citation.openalex_email is None
+        assert config.citation.rate_limit_rps == 10.0
 
     def test_missing_file_returns_defaults(self, tmp_path):
         config = load_config(str(tmp_path / "nonexistent.yaml"))
@@ -69,7 +74,6 @@ class TestLoadConfig:
 
         config = load_config(str(cfg_path))
         assert config.pipeline.papers_dir == "/x"
-        assert config.relevance.enabled is True  # default
         assert config.citation.threshold == 0.2  # default
 
     def test_empty_yaml(self, tmp_path):
@@ -92,8 +96,7 @@ class TestLoadConfig:
             "pipeline": {"papers_dir": "/p"},
             "vllm": {"model_name": "m"},
             "embedding": {"device": "cpu"},
-            "clustering": {"n_clusters": 5},
-            "relevance": {"threshold": 0.4},
+            "kmeans": {"n_clusters": 5},
             "affiliation": {"threshold": 0.5},
             "citation": {"threshold": 0.1},
         }
@@ -104,39 +107,6 @@ class TestLoadConfig:
         assert config.pipeline.papers_dir == "/p"
         assert config.vllm.model_name == "m"
         assert config.embedding.device == "cpu"
-        assert config.clustering.n_clusters == 5
-        assert config.relevance.threshold == 0.4
+        assert config.kmeans.n_clusters == 5
         assert config.affiliation.threshold == 0.5
         assert config.citation.threshold == 0.1
-
-
-class TestLoadSeedPapersConfig:
-    def test_valid_seed_config(self, tmp_path):
-        data = {"seed_papers": {"paper1.pdf": "Topic A", "paper2.pdf": "Topic B"}}
-        path = tmp_path / "seeds.yaml"
-        path.write_text(yaml.dump(data))
-
-        result = load_seed_papers_config(str(path))
-        assert result == {"paper1.pdf": "Topic A", "paper2.pdf": "Topic B"}
-
-    def test_missing_file_returns_empty(self, tmp_path):
-        result = load_seed_papers_config(str(tmp_path / "missing.yaml"))
-        assert result == {}
-
-    def test_empty_file_returns_empty(self, tmp_path):
-        path = tmp_path / "empty.yaml"
-        path.write_text("")
-        result = load_seed_papers_config(str(path))
-        assert result == {}
-
-    def test_no_seed_papers_key(self, tmp_path):
-        path = tmp_path / "other.yaml"
-        path.write_text(yaml.dump({"other_key": "value"}))
-        result = load_seed_papers_config(str(path))
-        assert result == {}
-
-    def test_null_seed_papers_key(self, tmp_path):
-        path = tmp_path / "null.yaml"
-        path.write_text(yaml.dump({"seed_papers": None}))
-        result = load_seed_papers_config(str(path))
-        assert result == {}

@@ -1,8 +1,6 @@
 pipeline:
   papers_dir: "papers"
-  seed_papers_dir: "seed_papers"
-  seed_papers_config: "config/seed_papers.yaml"
-  output_dir: "output"
+  output_dir: "output_seedless"
   cache_dir: "cache"
   log_level: "INFO"
 
@@ -14,23 +12,33 @@ vllm:
   gpu_memory_utilization: 0.90
 
 embedding:
-  model_name: "Qwen/Qwen3-Embedding-0.6B"
+  model_name: "Qwen/Qwen3-Embedding-4B"
   device: "cuda:2"
-  batch_size: 32
+  batch_size: 16
 
-clustering:
+section_extraction:
+  max_concurrent: 20
+  max_text_chars: 100000
+  temperature: 0.3
+  max_tokens: 1024
+
+kmeans:
   n_clusters: 10
-  method: "gmm"
-  dimensionality_reduction: false
-  reduced_dim: 128
+  n_init: 10
+  random_state: 42
+  enabled_views: [0, 1, 2, 3, 4]
+  weak_member_percentile: 90.0
+  pca_components: 50  # PCA dim reduction before K-Means (0 = disabled)
 
-relevance:
+hindex:
   enabled: true
-  threshold: 0.3
+  max_hindex_baseline: 50
+  default_score: 0.3
+  cache_max_age_days: 30
+  rate_limit_rps: 1.0  # Semantic Scholar free tier: ~1 req/sec
 
 affiliation:
   enabled: true
-  threshold: 0.3
   university_rankings_path: "config/university_rankings.csv"
   company_tiers_path: "config/company_tiers.yaml"
   first_author_weight: 0.5
@@ -38,9 +46,11 @@ affiliation:
 
 citation:
   enabled: true
-  threshold: 0.2
+  source: "openalex"  # "openalex" (recommended) or "semantic_scholar"
+  openalex_api_key: null  # Free key from openalex.org/settings/api (100k credits/day)
+  openalex_email: null  # Optional email for polite pool access
   semantic_scholar_api_key: null
-  rate_limit_rps: 5.0
+  rate_limit_rps: 10.0
   max_retries: 3
   cache_max_age_days: 30
   expected_citations: {0: 5, 1: 15, 2: 40, 3: 80, 4: 120, 5: 160}

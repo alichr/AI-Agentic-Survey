@@ -11,12 +11,17 @@ venv/
 .venv/
 env/
 
-# Cache & output (generated at project root)
+# Cache & output (generated at runtime)
 /cache/
 /output/
+/output_seedless/
 *.db
 *.sqlite
 *.sqlite3
+
+# Generated artifacts
+pipeline_diagram.pdf
+pipeline_diagram.png
 
 # IDE
 .vscode/
@@ -36,6 +41,11 @@ Thumbs.db
 papers/
 seed_papers/*.pdf
 
-# Coverage reports
+# Testing
 .coverage
 htmlcov/
+.pytest_cache/
+.benchmarks/
+
+# Claude Code local config
+.claude/

@@ -20,6 +20,14 @@ class CitationData:
     paper_id: Optional[str] = None
 
 
+@dataclass
+class AuthorData:
+    """Author information including h-index from Semantic Scholar."""
+    author_id: Optional[str]
+    name: str
+    hindex: Optional[int] = None
+
+
 class SemanticScholarClient:
     """Async client for the Semantic Scholar API.
 
@@ -121,6 +129,68 @@ class SemanticScholarClient:
                 return None
 
         return None
+
+    async def get_paper_authors(self, paper_id: str) -> list["AuthorData"]:
+        """Fetch author data including h-index for a paper.
+
+        Args:
+            paper_id: Semantic Scholar paper ID.
+
+        Returns:
+            List of AuthorData with h-index information.
+        """
+        if not paper_id:
+            return []
+
+        session = await self._get_session()
+        url = f"{BASE_URL}/paper/{paper_id}"
+        params = {"fields": "authors.hIndex,authors.authorId,authors.name"}
+
+        for attempt in range(self.max_retries):
+            try:
+                await self._rate_limit()
+                async with session.get(url, params=params) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        authors = []
+                        for a in data.get("authors", []):
+                            authors.append(AuthorData(
+                                author_id=a.get("authorId"),
+                                name=a.get("name", "Unknown"),
+                                hindex=a.get("hIndex"),
+                            ))
+                        return authors
+
+                    elif resp.status == 429:
+                        wait = 2 ** attempt * 2
+                        logger.warning(
+                            "Rate limited fetching authors, waiting %ds (attempt %d/%d)",
+                            wait, attempt + 1, self.max_retries,
+                        )
+                        await asyncio.sleep(wait)
+                        continue
+
+                    elif resp.status == 404:
+                        return []
+
+                    else:
+                        text = await resp.text()
+                        logger.warning(
+                            "Semantic Scholar API error %d fetching authors: %s",
+                            resp.status, text[:200],
+                        )
+                        return []
+
+            except aiohttp.ClientError as e:
+                logger.warning("HTTP error fetching authors for '%s': %s", paper_id, e)
+                if attempt < self.max_retries - 1:
+                    await asyncio.sleep(2 ** attempt)
+                continue
+            except Exception as e:
+                logger.error("Unexpected error fetching authors for '%s': %s", paper_id, e)
+                return []
+
+        return []
 
     async def close(self):
         """Close the HTTP session."""

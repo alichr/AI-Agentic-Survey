@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from src.models.paper import Author, Paper, PaperMetadata, PaperScores
+from src.models.paper import Author, Paper, PaperMetadata, PaperScores, PaperSections, SectionType
 
 
 class TestAuthor:
@@ -34,20 +34,25 @@ class TestPaperMetadata:
 
 
 class TestPaperScores:
-    def test_defaults_all_none(self):
+    def test_defaults_all_empty(self):
         s = PaperScores()
-        assert s.relevance_score is None
-        assert s.cluster_id is None
-        assert s.cluster_label is None
-        assert s.affiliation_score is None
-        assert s.citation_score is None
+        assert s.cluster_ids == {}
+        assert s.centroid_distances == {}
+        assert s.weak_member == {}
+        assert s.max_hindex is None
+        assert s.first_author_affiliation_score is None
+        assert s.last_author_affiliation_score is None
         assert s.citation_count is None
 
     def test_set_values(self):
-        s = PaperScores(relevance_score=0.9, cluster_id=2, cluster_label="Planning")
-        assert s.relevance_score == 0.9
-        assert s.cluster_id == 2
-        assert s.cluster_label == "Planning"
+        s = PaperScores(
+            cluster_ids={0: 2, 1: 3},
+            first_author_affiliation_score=0.9,
+            citation_count=42,
+        )
+        assert s.cluster_ids == {0: 2, 1: 3}
+        assert s.first_author_affiliation_score == 0.9
+        assert s.citation_count == 42
 
 
 class TestPaper:
@@ -65,8 +70,6 @@ class TestPaper:
         assert p.pdf_path == Path("/tmp/test.pdf")
         assert p.venue == "ICML"
         assert p.pdf_hash == "abc123"
-        assert p.is_seed is False
-        assert p.accepted is False
 
     def test_title_property_with_metadata(self):
         meta = PaperMetadata(title="My Title")
@@ -138,4 +141,30 @@ class TestPaper:
     def test_scores_default_factory(self):
         p = self._make_paper()
         assert isinstance(p.scores, PaperScores)
-        assert p.scores.relevance_score is None
+        assert p.scores.max_hindex is None
+
+    def test_sections_default_none(self):
+        p = self._make_paper()
+        assert p.sections is None
+
+    def test_section_summaries_default_empty(self):
+        p = self._make_paper()
+        assert p.section_summaries == {}
+
+    def test_section_embeddings_default_empty(self):
+        p = self._make_paper()
+        assert p.section_embeddings == {}
+
+
+class TestPaperSections:
+    def test_get_section(self):
+        s = PaperSections(introduction="intro text", method="method text")
+        assert s.get_section(SectionType.INTRODUCTION) == "intro text"
+        assert s.get_section(SectionType.METHOD) == "method text"
+        assert s.get_section(SectionType.RELATED_WORK) is None
+
+    def test_as_dict(self):
+        s = PaperSections(introduction="intro")
+        d = s.as_dict()
+        assert d[SectionType.INTRODUCTION] == "intro"
+        assert d[SectionType.TITLE_ABSTRACT_CONCLUSION] is None
