@@ -5,16 +5,20 @@ Automatically select relevant papers for a survey on **Agentic AI**. Given a poo
 ## Quick Start
 
 ```bash
-# 1. Install dependencies
+# 1. Create virtual environment
+python3 -m venv venv
+source venv/bin/activate
+
+# 2. Install dependencies
 pip install -r requirements.txt
 pip install vllm
 
-# 2. Start the LLM server (needs GPU)
+# 3. Start the LLM server (needs GPU)
 bash scripts/start_vllm_server.sh
 
-# 3. Place PDFs in papers/<Venue>/
+# 4. Place PDFs in papers/<Venue>/
 
-# 4. Run the pipeline
+# 5. Run the pipeline
 python -m src.main
 ```
 
