@@ -4,6 +4,7 @@ import logging
 from typing import Optional
 
 import numpy as np
+import torch
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,7 @@ class EmbeddingModel:
                 device=self.device,
                 model_kwargs={"attn_implementation": "flash_attention_2"},
                 trust_remote_code=True,
+                torch_dtype=torch.float16
             )
         except Exception:
             logger.warning("flash_attention_2 not available, falling back to default attention")
