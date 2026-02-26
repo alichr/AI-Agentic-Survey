@@ -20,8 +20,7 @@ env/
 *.sqlite3
 
 # Generated artifacts
-pipeline_diagram.pdf
-pipeline_diagram.png
+docs/pipeline_diagram.png
 
 # IDE
 .vscode/

@@ -440,13 +440,13 @@ def generate():
 
     # ── Save ───────────────────────────────────────────────────────────
     base = Path(__file__).resolve().parent.parent
-    out_pdf = base / "pipeline_diagram.pdf"
+    out_pdf = base / "docs" / "pipeline_diagram.pdf"
     fig.savefig(out_pdf, format="pdf", bbox_inches="tight",
                 dpi=200, facecolor=BG_COLOR)
     print(f"Pipeline diagram saved to {out_pdf}")
 
     if "--png" in sys.argv:
-        out_png = base / "pipeline_diagram.png"
+        out_png = base / "docs" / "pipeline_diagram.png"
         fig.savefig(out_png, format="png", bbox_inches="tight",
                     dpi=150, facecolor=BG_COLOR)
         print(f"PNG preview saved to {out_png}")
