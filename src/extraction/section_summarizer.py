@@ -1,7 +1,7 @@
 """Async LLM-based section summarization via vLLM OpenAI-compatible API.
 
 Takes raw section text (from heuristic splitting) and produces concise
-~200-word summaries suitable for embedding-based clustering.
+summaries (configurable word count) suitable for embedding-based clustering.
 """
 
 import asyncio
@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 SECTION_PROMPTS = {
     "title_abstract_conclusion": """You are an expert at analyzing academic papers. Below is text from the Title, Abstract, and Conclusion of a research paper.
 
-Write a detailed summary (~400 words) extracting:
+Write a detailed summary (~{target_words} words) extracting:
 - The exact paper title and the core research problem it addresses
 - The main contribution or novelty claim (what is new compared to prior work?)
 - The type of system or approach (e.g., multi-agent framework, LLM-based planner, RL policy, tool-use agent, etc.)
@@ -32,7 +32,7 @@ Summary:""",
 
     "introduction": """You are an expert at analyzing academic papers. Below is the Introduction section of a research paper.
 
-Write a detailed summary (~400 words) extracting:
+Write a detailed summary (~{target_words} words) extracting:
 - The problem statement: what specific gap, challenge, or limitation does this paper address?
 - The motivation: why is this problem important? What fails in current approaches?
 - The proposed solution at a high level: what is the paper's main idea or approach?
@@ -49,7 +49,7 @@ Summary:""",
 
     "related_work": """You are an expert at analyzing academic papers. Below is the Related Work / Background section of a research paper.
 
-Write a detailed summary (~400 words) extracting:
+Write a detailed summary (~{target_words} words) extracting:
 - The main research areas and subfields this paper connects to (list them explicitly)
 - Key prior methods, systems, or frameworks cited and what they do (name them by name)
 - What limitations of prior work does this paper identify? What gaps remain?
@@ -66,7 +66,7 @@ Summary:""",
 
     "method": """You are an expert at analyzing academic papers. Below is the Methodology / Approach section of a research paper.
 
-Write a detailed summary (~400 words) extracting:
+Write a detailed summary (~{target_words} words) extracting:
 - The overall architecture or system design (components, modules, how they interact)
 - The specific algorithms, models, or techniques used (name them: e.g., PPO, chain-of-thought, ReAct, tree search, etc.)
 - The input/output specification: what does the system take in and produce?
@@ -85,7 +85,7 @@ Summary:""",
 
     "experiments": """You are an expert at analyzing academic papers. Below is the Experiments / Results section of a research paper.
 
-Write a detailed summary (~400 words) extracting:
+Write a detailed summary (~{target_words} words) extracting:
 - The benchmarks, datasets, or environments used for evaluation (name them explicitly)
 - The baseline methods compared against (name them explicitly)
 - The main quantitative results: metrics, scores, and performance numbers
@@ -106,7 +106,7 @@ Summary:""",
 # Fallback for any section not in the map above
 GENERIC_SUMMARY_PROMPT = """You are an expert at summarizing academic papers. Below is text from the "{section_name}" section of a research paper.
 
-Write a detailed summary (~400 words) that captures the key ideas, methods, findings, or contributions of this section.
+Write a detailed summary (~{target_words} words) that captures the key ideas, methods, findings, or contributions of this section.
 
 Be factual and specific. Do NOT include filler phrases like "This section discusses..." — jump straight into the content.
 
@@ -128,11 +128,11 @@ MAX_SECTION_INPUT_CHARS = 50000
 
 
 class SectionSummarizer:
-    """Summarizes raw section text into concise ~200-word summaries using an LLM."""
+    """Summarizes raw section text into concise summaries using an LLM."""
 
     def __init__(self, base_url: str, model_name: str,
                  max_concurrent: int = 20, temperature: float = 0.3,
-                 max_tokens: int = 1024):
+                 max_tokens: int = 1024, target_words: int = 400):
         self.client = AsyncOpenAI(
             base_url=base_url,
             api_key="not-needed",
@@ -141,6 +141,7 @@ class SectionSummarizer:
         self.semaphore = asyncio.Semaphore(max_concurrent)
         self.temperature = temperature
         self.max_tokens = max_tokens
+        self.target_words = target_words
 
     async def summarize(self, section_text: str, section_name: str,
                         retries: int = 1) -> Optional[str]:
@@ -160,12 +161,15 @@ class SectionSummarizer:
         truncated = section_text[:MAX_SECTION_INPUT_CHARS]
 
         if section_name in SECTION_PROMPTS:
-            prompt = SECTION_PROMPTS[section_name].format(section_text=truncated)
+            prompt = SECTION_PROMPTS[section_name].format(
+                section_text=truncated, target_words=self.target_words,
+            )
         else:
             display_name = SECTION_DISPLAY_NAMES.get(section_name, section_name)
             prompt = GENERIC_SUMMARY_PROMPT.format(
                 section_name=display_name,
                 section_text=truncated,
+                target_words=self.target_words,
             )
 
         for attempt in range(1 + retries):

@@ -20,6 +20,7 @@ class KMeansResult:
     centroid_distances: np.ndarray # shape (n_papers,) — distance to assigned centroid
     n_clusters: int
     weak_members: np.ndarray      # shape (n_papers,) — boolean mask
+    pca: Optional[PCA] = None     # fitted PCA transformer (None if PCA not applied)
 
 
 class MultiViewKMeans:
@@ -65,15 +66,16 @@ class MultiViewKMeans:
 
         # Optional PCA dimensionality reduction
         reduced = embeddings
+        fitted_pca = None
         if (self.pca_components is not None
                 and self.pca_components < orig_dim
                 and n_papers > self.pca_components):
-            pca = PCA(
+            fitted_pca = PCA(
                 n_components=self.pca_components,
                 random_state=self.random_state,
             )
-            reduced = pca.fit_transform(embeddings)
-            variance_kept = pca.explained_variance_ratio_.sum()
+            reduced = fitted_pca.fit_transform(embeddings)
+            variance_kept = fitted_pca.explained_variance_ratio_.sum()
             logger.info(
                 "View %d: PCA %d → %d dims (%.1f%% variance retained)",
                 section_type, orig_dim, self.pca_components,
@@ -111,4 +113,5 @@ class MultiViewKMeans:
             centroid_distances=centroid_distances,
             n_clusters=actual_k,
             weak_members=weak_members,
+            pca=fitted_pca,
         )

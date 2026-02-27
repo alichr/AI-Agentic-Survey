@@ -5,8 +5,6 @@
 **Automated multi-view clustering pipeline for academic paper selection**
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
 <br/>
 
@@ -17,26 +15,6 @@
 </div>
 
 <br/>
-
-## Quick Start
-
-```bash
-# 1. Create virtual environment
-python3 -m venv venv
-source venv/bin/activate
-
-# 2. Install dependencies
-pip install -r requirements.txt
-pip install vllm
-
-# 3. Start the LLM server (needs GPU)
-bash scripts/start_vllm_server.sh
-
-# 4. Place PDFs in papers/<Venue>/
-
-# 5. Run the pipeline
-python -m src.main
-```
 
 ## Prerequisites
 
@@ -103,11 +81,12 @@ VLLM_TP_SIZE=1 VLLM_MAX_MODEL_LEN=32768 bash scripts/start_vllm_server.sh
 ### 4. Run the pipeline
 
 ```bash
+# Full pipeline (all-in-one)
 python -m src.main
 ```
 
 <details>
-<summary>CLI options</summary>
+<summary>CLI options (full pipeline)</summary>
 
 | Flag | Description |
 |:-----|:------------|
@@ -119,6 +98,53 @@ python -m src.main
 | `--papers-dir PATH` | Override papers directory |
 | `--output-dir PATH` | Override output directory |
 | `--n-clusters N` | Override number of K-Means clusters |
+
+</details>
+
+### Distributed workflow (prepare + cluster)
+
+When multiple people each have different sets of papers, use `prepare` to export portable bundles independently, then `cluster` to merge and cluster them all together:
+
+```bash
+# Each person exports their papers
+python -m src.main prepare --config config/default_config.yaml --export-dir exports/alice/
+python -m src.main prepare --config config/default_config.yaml --export-dir exports/bob/
+
+# One person collects all exports and runs clustering + seed topic assignment
+python -m src.main cluster --input-dir exports/ --config config/default_config.yaml --n-clusters 15 --seeds-file config/seeds.yaml
+```
+
+Each `prepare` run produces a directory with:
+- `papers.json` — metadata, section summaries, and quality scores
+- `embeddings.npz` — section embedding vectors
+
+The `cluster` command scans the input directory recursively, deduplicates papers by content hash, and produces the same CSV output as the full pipeline.
+
+<details>
+<summary>prepare options</summary>
+
+| Flag | Description |
+|:-----|:------------|
+| `--export-dir PATH` | **(required)** Directory to write papers.json + embeddings.npz |
+| `--config PATH` | Custom config file |
+| `--papers-dir PATH` | Override papers directory |
+| `--output-dir PATH` | Override output directory |
+| `--no-citation` | Skip citation scoring |
+| `--no-affiliation` | Skip affiliation scoring |
+| `--no-hindex` | Skip h-index scoring |
+
+</details>
+
+<details>
+<summary>cluster options</summary>
+
+| Flag | Description |
+|:-----|:------------|
+| `--input-dir PATH` | **(required)** Directory containing export bundles (scanned recursively) |
+| `--config PATH` | Custom config file |
+| `--output-dir PATH` | Override output directory |
+| `--n-clusters N` | Override number of K-Means clusters |
+| `--seeds-file PATH` | YAML file with seed topic descriptions for cluster assignment (see [Seed Topics](#seed-based-topic-assignment)) |
 
 </details>
 
@@ -161,9 +187,57 @@ python -m src.main
 | `last_author_affiliation_score` | Affiliation quality score (0&ndash;1) |
 | `cluster_<view>` | Cluster ID per section view (5 columns) |
 | `centroid_dist_<view>` | Distance to cluster centroid per view (5 columns) |
+| `seed_topic_<view>` | Seed topic assigned in this view (empty if unmatched; 5 columns) |
+| `seed_dist_<view>` | Distance to assigned seed in this view (5 columns) |
+| `seed_topic` | Final seed topic via majority vote across views |
+| `seed_topic_distance` | Mean distance to winning seed across matching views |
 | `max_hindex` | Maximum h-index among paper authors |
 | `citation_count` | Raw citation count |
 | `pdf_path` | Path to the PDF file |
+
+</details>
+
+## Seed-Based Topic Assignment
+
+When using the `cluster` command, you can optionally provide a `--seeds-file` to assign named topics to clusters. Each seed topic includes per-view descriptions that are embedded and matched to the nearest K-Means centroid independently per view. Papers are then assigned topics via majority vote across views.
+
+```bash
+python -m src.main cluster --input-dir exports/ --seeds-file config/seeds.yaml
+```
+
+<details>
+<summary>Seeds file format (YAML)</summary>
+
+```yaml
+# config/seeds.yaml
+- name: "Agentic LLM Systems"
+  descriptions:
+    0: "Autonomous large language model agents that perceive environments..."
+    1: "Recent advances show that LLMs can serve as the cognitive core..."
+    2: "Prior work on tool-augmented language models, ReAct, AutoGPT..."
+    3: "The method equips an LLM with tools, working memory, and planning..."
+    4: "Experiments on WebArena, SWE-bench, GAIA, and ToolBench..."
+
+- name: "Multi-Agent Collaboration"
+  descriptions:
+    0: "Systems of multiple AI agents that communicate and collaborate..."
+    1: "Scaling from single-agent to multi-agent systems addresses..."
+    2: "Related work on CAMEL, MetaGPT, AutoGen, and CrewAI..."
+    3: "A team of agents with distinct roles and communication protocol..."
+    4: "Evaluation on ChatDev, multi-agent coding, collaborative writing..."
+```
+
+Keys `0`&ndash;`4` correspond to the 5 section views (Title+Abstract+Conclusion, Introduction, Related Work, Method, Experiments).
+
+</details>
+
+<details>
+<summary>How it works</summary>
+
+1. **Per view**: seed descriptions are embedded and projected through the same PCA used for clustering, then greedy-assigned to the nearest unoccupied K-Means centroid
+2. **Paper assignment**: papers in a seeded cluster get that seed's topic; papers in unseeded clusters are unassigned for that view
+3. **Majority vote**: across all views, the seed that appears most often wins; ties are broken by lower mean distance
+4. Without `--seeds-file`, the `seed_topic` and `seed_topic_distance` columns are empty (backward compatible)
 
 </details>
 
@@ -232,6 +306,7 @@ pytest tests/ -m live -v                           # Live (needs GPU + vLLM)
 ```
 config/
   default_config.yaml        Main configuration
+  seeds.yaml                 Sample seed topics for cluster assignment
   university_rankings.csv    QS 2025 top 200 universities
   company_tiers.yaml         71 companies across 3 tiers
 scripts/
@@ -249,6 +324,9 @@ src/
     section_splitter.py      Heuristic regex section splitting
     section_extractor.py     LLM fallback for section detection
     section_summarizer.py    Section-specific LLM summarization
+  export/
+    exporter.py              Export papers to portable bundle
+    importer.py              Import and merge bundles
   embedding/
     embedding_model.py       Sentence-transformers wrapper
     kmeans_clustering.py     PCA + multi-view K-Means

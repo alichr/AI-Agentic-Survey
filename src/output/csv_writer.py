@@ -41,6 +41,18 @@ def write_results_csv(papers: list[Paper], csv_path: Path):
         fieldnames.append(f"cluster_{vname}")
         fieldnames.append(f"centroid_dist_{vname}")
 
+    # Per-view seed topic assignment
+    for v in views:
+        vname = VIEW_NAMES.get(v.value, f"v{v.value}")
+        fieldnames.append(f"seed_topic_{vname}")
+        fieldnames.append(f"seed_dist_{vname}")
+
+    # Seed-based topic assignment (majority vote)
+    fieldnames.extend([
+        "seed_topic",
+        "seed_topic_distance",
+    ])
+
     # Raw quality signals
     fieldnames.extend([
         "max_hindex",
@@ -83,6 +95,19 @@ def write_results_csv(papers: list[Paper], csv_path: Path):
                 row[f"centroid_dist_{vname}"] = (
                     f"{dist:.4f}" if dist is not None else ""
                 )
+
+            for v in views:
+                vid = v.value
+                vname = VIEW_NAMES.get(vid, f"v{vid}")
+                row[f"seed_topic_{vname}"] = paper.scores.seed_topic_views.get(vid, "")
+                sd = paper.scores.seed_topic_dist_views.get(vid)
+                row[f"seed_dist_{vname}"] = f"{sd:.4f}" if sd is not None else ""
+
+            row["seed_topic"] = paper.scores.seed_topic or ""
+            row["seed_topic_distance"] = (
+                f"{paper.scores.seed_topic_distance:.4f}"
+                if paper.scores.seed_topic_distance is not None else ""
+            )
 
             row["max_hindex"] = (
                 paper.scores.max_hindex if paper.scores.max_hindex is not None else ""

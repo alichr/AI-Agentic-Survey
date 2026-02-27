@@ -74,6 +74,12 @@ class PaperScores:
     first_author_affiliation_score: Optional[float] = None
     last_author_affiliation_score: Optional[float] = None
     citation_count: Optional[int] = None
+    # Seed-based topic assignment (per-view)
+    seed_topic_views: dict[int, str] = field(default_factory=dict)        # view → seed name
+    seed_topic_dist_views: dict[int, float] = field(default_factory=dict) # view → distance
+    # Seed-based topic assignment (majority vote across views)
+    seed_topic: Optional[str] = None
+    seed_topic_distance: Optional[float] = None
 
 
 @dataclass

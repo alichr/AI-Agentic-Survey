@@ -67,6 +67,7 @@ class SectionExtractionConfig:
     max_text_chars: int = 100000
     temperature: float = 0.3
     max_tokens: int = 1024
+    summary_target_words: int = 400
 
 
 @dataclass

@@ -21,6 +21,7 @@ section_extraction:
   max_text_chars: 100000
   temperature: 0.3
   max_tokens: 1024
+  summary_target_words: 400  # Target word count for section summaries (try 200 for tighter embeddings)
 
 kmeans:
   n_clusters: 10

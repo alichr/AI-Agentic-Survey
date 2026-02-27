@@ -13,6 +13,8 @@ from src.cache.cache_manager import CacheManager
 from src.config import Config
 from src.embedding.embedding_model import EmbeddingModel
 from src.embedding.kmeans_clustering import MultiViewKMeans
+from src.export.exporter import export_papers
+from src.export.importer import import_all_papers
 from src.extraction.metadata_extractor import MetadataExtractor
 from src.extraction.pdf_extractor import PDFExtractor
 from src.extraction.section_extractor import SectionExtractor
@@ -78,6 +80,72 @@ class Pipeline:
 
         self.cache.close()
         console.rule("[bold green]Pipeline Complete")
+
+    def prepare(self, export_dir: str):
+        """Run extraction/scoring stages and export a portable bundle.
+
+        Stages: Discovery → Full-Text → Metadata → Section Split →
+                Section Summarize → filter → Embedding → Scoring → Export
+        """
+        console.rule("[bold blue]Prepare: Extract & Export")
+
+        self._stage1_discovery()
+        self._stage2_full_text_extraction()
+        asyncio.run(self._stage3_metadata_extraction())
+        self._stage4a_section_splitting()
+        asyncio.run(self._stage4b_section_summarization())
+        self._filter_incomplete_papers()
+        self._stage5_embedding()
+
+        # Scoring
+        self._stage7a_affiliation_scoring()
+        asyncio.run(self._stage7b_citation_scoring())
+        asyncio.run(self._stage7c_hindex_scoring())
+
+        # Export bundle
+        console.rule("[bold]Export")
+        export_papers(self.papers, self.incomplete_papers, export_dir)
+        console.print(
+            f"  Exported {len(self.papers)} complete + "
+            f"{len(self.incomplete_papers)} incomplete papers to {export_dir}"
+        )
+
+        self.cache.close()
+        console.rule("[bold green]Prepare Complete")
+
+    def cluster(self, input_dir: str, seeds_file: str = None):
+        """Import bundles from input_dir, cluster, and output CSV.
+
+        Stages: Import → K-Means → (optional) Seed Assignment → Output
+        """
+        console.rule("[bold blue]Cluster: Import & Cluster")
+
+        # Import
+        console.rule("[bold]Import Bundles")
+        self.papers, self.incomplete_papers = import_all_papers(input_dir)
+        console.print(
+            f"  Loaded {len(self.papers)} complete + "
+            f"{len(self.incomplete_papers)} incomplete papers"
+        )
+
+        if not self.papers:
+            console.print("[bold red]No complete papers found — nothing to cluster")
+            return
+
+        # Cluster
+        kmeans_results = self._stage6_kmeans_clustering()
+
+        # Seed-based topic assignment
+        if seeds_file:
+            seeds = self._load_seeds(seeds_file)
+            if seeds:
+                seed_embeddings = self._embed_seeds(seeds)
+                self._assign_seed_topics(kmeans_results, seeds, seed_embeddings)
+
+        # Output
+        self._stage8_output()
+
+        console.rule("[bold green]Cluster Complete")
 
     # -------------------------------------------------------------------------
     # Stage 1: Discovery
@@ -344,6 +412,7 @@ class Pipeline:
             max_concurrent=sec_cfg.max_concurrent,
             temperature=sec_cfg.temperature,
             max_tokens=1024,
+            target_words=sec_cfg.summary_target_words,
         )
 
         section_names = [
@@ -528,8 +597,12 @@ class Pipeline:
     # Stage 6: Multi-View K-Means Clustering
     # -------------------------------------------------------------------------
 
-    def _stage6_kmeans_clustering(self):
-        """Run independent K-Means per section view."""
+    def _stage6_kmeans_clustering(self) -> dict:
+        """Run independent K-Means per section view.
+
+        Returns:
+            Dict mapping view int → KMeansResult (with fitted PCA).
+        """
         console.rule("[bold]Stage 6: Multi-View K-Means Clustering")
 
         pca = self.config.kmeans.pca_components or None
@@ -542,6 +615,7 @@ class Pipeline:
         )
 
         enabled_views = self.config.kmeans.enabled_views
+        kmeans_results = {}
 
         for view in enabled_views:
             valid_indices = [
@@ -559,6 +633,7 @@ class Pipeline:
             )
 
             result = kmeans.fit_predict(embeddings, view)
+            kmeans_results[view] = result
 
             # Store per-view cluster assignments
             for j, paper_idx in enumerate(valid_indices):
@@ -574,6 +649,237 @@ class Pipeline:
                 f"{result.n_clusters} clusters  "
                 f"(sizes: {sorted(sizes.values(), reverse=True)})"
             )
+
+        return kmeans_results
+
+    # -------------------------------------------------------------------------
+    # Seed-Based Topic Assignment
+    # -------------------------------------------------------------------------
+
+    def _load_seeds(self, seeds_file: str) -> list[dict]:
+        """Load seed topics from a YAML file.
+
+        Each entry must have 'name' (str) and 'descriptions' (dict with int
+        keys 0–4 mapping to description strings).
+
+        Returns:
+            List of seed dicts with 'name' and 'descriptions' keys.
+        """
+        import yaml as _yaml
+
+        console.rule("[bold]Seed Topics: Loading")
+        path = Path(seeds_file)
+        if not path.exists():
+            console.print(f"  [bold red]Seeds file not found: {seeds_file}")
+            return []
+
+        with open(path) as f:
+            raw = _yaml.safe_load(f)
+
+        if not isinstance(raw, list):
+            console.print("[bold red]Seeds file must be a YAML list")
+            return []
+
+        seeds = []
+        for i, entry in enumerate(raw):
+            name = entry.get("name")
+            descriptions = entry.get("descriptions")
+            if not name or not isinstance(descriptions, dict):
+                logger.warning("Seed entry %d missing name or descriptions, skipping", i)
+                continue
+            # Normalise keys to int
+            descriptions = {int(k): str(v) for k, v in descriptions.items()}
+            seeds.append({"name": name, "descriptions": descriptions})
+
+        console.print(f"  Loaded {len(seeds)} seed topics from {seeds_file}")
+        for s in seeds:
+            console.print(f"    - {s['name']} (views: {sorted(s['descriptions'].keys())})")
+        return seeds
+
+    def _embed_seeds(self, seeds: list[dict]) -> dict[int, np.ndarray]:
+        """Embed seed descriptions per view.
+
+        Returns:
+            Dict mapping view int → array of shape (n_seeds, embed_dim).
+        """
+        console.rule("[bold]Seed Topics: Embedding")
+
+        model = EmbeddingModel(
+            model_name=self.config.embedding.model_name,
+            device=self.config.embedding.device,
+            batch_size=self.config.embedding.batch_size,
+        )
+        enabled_views = self.config.kmeans.enabled_views
+        seed_embeddings: dict[int, np.ndarray] = {}
+
+        for view in enabled_views:
+            texts = []
+            for seed in seeds:
+                text = seed["descriptions"].get(view, "")
+                if not text.strip():
+                    logger.warning(
+                        "Seed '%s' has no description for view %d, using name",
+                        seed["name"], view,
+                    )
+                    text = seed["name"]
+                texts.append(text)
+
+            embs = model.embed(texts)
+            seed_embeddings[view] = embs
+            console.print(
+                f"  View {view}: embedded {len(texts)} seed descriptions "
+                f"→ shape {embs.shape}"
+            )
+
+        return seed_embeddings
+
+    def _assign_seed_topics(
+        self,
+        kmeans_results: dict,
+        seeds: list[dict],
+        seed_embeddings: dict[int, np.ndarray],
+    ):
+        """Assign seed topics to papers via per-view cluster matching + majority vote.
+
+        Per view:
+          1. Project seed embeddings through the same PCA used for clustering
+          2. Greedy-assign each seed to the nearest unoccupied K-Means centroid
+          3. Papers in a seeded cluster get (seed_idx, distance_to_seed)
+
+        Combine across views:
+          - Majority vote across views → winning seed
+          - seed_topic_distance = mean distance across matching views
+          - Ties broken by lower mean distance; no votes → unassigned
+        """
+        from scipy.spatial.distance import cdist
+
+        console.rule("[bold]Seed Topics: Assignment")
+
+        n_seeds = len(seeds)
+        n_papers = len(self.papers)
+        enabled_views = self.config.kmeans.enabled_views
+
+        # Per-view: paper_idx → (seed_idx, distance)
+        per_view_assignments: dict[int, dict[int, tuple[int, float]]] = {}
+
+        for view in enabled_views:
+            if view not in kmeans_results:
+                continue
+            result = kmeans_results[view]
+
+            # Project seed embeddings through PCA (if PCA was used)
+            raw_seed_embs = seed_embeddings[view]
+            if result.pca is not None:
+                seed_reduced = result.pca.transform(raw_seed_embs)
+            else:
+                seed_reduced = raw_seed_embs
+
+            # Distance from each seed to each centroid: (n_seeds, n_clusters)
+            seed_to_centroid = cdist(seed_reduced, result.centroids, metric="euclidean")
+
+            # Greedy assignment: seeds sorted by their min distance get first pick
+            min_dists = seed_to_centroid.min(axis=1)
+            seed_order = np.argsort(min_dists)
+            occupied = set()
+            seed_to_cluster: dict[int, int] = {}
+
+            for s_idx in seed_order:
+                # Sort clusters by distance for this seed
+                cluster_order = np.argsort(seed_to_centroid[s_idx])
+                for c_idx in cluster_order:
+                    c_idx = int(c_idx)
+                    if c_idx not in occupied:
+                        seed_to_cluster[s_idx] = c_idx
+                        occupied.add(c_idx)
+                        break
+
+            # Reverse map: cluster → seed
+            cluster_to_seed = {c: s for s, c in seed_to_cluster.items()}
+
+            # Build paper embeddings in PCA space for this view
+            valid_indices = [
+                i for i, p in enumerate(self.papers)
+                if view in p.section_embeddings
+            ]
+            if not valid_indices:
+                continue
+
+            paper_embs_raw = np.array(
+                [self.papers[i].section_embeddings[view] for i in valid_indices],
+                dtype=np.float32,
+            )
+            if result.pca is not None:
+                paper_reduced = result.pca.transform(paper_embs_raw)
+            else:
+                paper_reduced = paper_embs_raw
+
+            # Distance from each paper to each seed: (n_valid_papers, n_seeds)
+            paper_to_seed = cdist(paper_reduced, seed_reduced, metric="euclidean")
+
+            # Assign papers
+            view_assignments: dict[int, tuple[int, float]] = {}
+            for j, paper_idx in enumerate(valid_indices):
+                cluster_id = self.papers[paper_idx].scores.cluster_ids.get(view)
+                if cluster_id is not None and cluster_id in cluster_to_seed:
+                    s_idx = cluster_to_seed[cluster_id]
+                    dist = float(paper_to_seed[j, s_idx])
+                    view_assignments[paper_idx] = (s_idx, dist)
+                    # Store per-view seed assignment on the paper
+                    self.papers[paper_idx].scores.seed_topic_views[view] = seeds[s_idx]["name"]
+                    self.papers[paper_idx].scores.seed_topic_dist_views[view] = dist
+
+            per_view_assignments[view] = view_assignments
+
+            assigned_count = len(view_assignments)
+            console.print(
+                f"  View {view}: {assigned_count}/{len(valid_indices)} papers "
+                f"assigned to seed topics"
+            )
+            for s_idx, c_idx in sorted(seed_to_cluster.items()):
+                console.print(
+                    f"    seed '{seeds[s_idx]['name']}' → cluster {c_idx} "
+                    f"(dist={seed_to_centroid[s_idx, c_idx]:.4f})"
+                )
+
+        # Majority vote across views
+        console.rule("[bold]Seed Topics: Majority Vote")
+        assigned_count = 0
+
+        for paper_idx in range(n_papers):
+            # Collect (seed_idx, distance) from each view
+            votes: dict[int, list[float]] = {}
+            for view in enabled_views:
+                assignment = per_view_assignments.get(view, {}).get(paper_idx)
+                if assignment is not None:
+                    s_idx, dist = assignment
+                    votes.setdefault(s_idx, []).append(dist)
+
+            if not votes:
+                continue
+
+            # Find seed with most votes; break ties by lower mean distance
+            best_seed = max(
+                votes.keys(),
+                key=lambda s: (len(votes[s]), -np.mean(votes[s])),
+            )
+            mean_dist = float(np.mean(votes[best_seed]))
+
+            self.papers[paper_idx].scores.seed_topic = seeds[best_seed]["name"]
+            self.papers[paper_idx].scores.seed_topic_distance = mean_dist
+            assigned_count += 1
+
+        console.print(
+            f"  {assigned_count}/{n_papers} papers assigned a seed topic "
+            f"via majority vote"
+        )
+
+        # Summary per topic
+        from collections import Counter
+        topic_counts = Counter(
+            p.scores.seed_topic for p in self.papers if p.scores.seed_topic
+        )
+        for topic, count in topic_counts.most_common():
+            console.print(f"    - {topic}: {count} papers")
 
     # -------------------------------------------------------------------------
     # Stage 7: Scoring (affiliation + citation + h-index)
