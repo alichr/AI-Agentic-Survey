@@ -1,9 +1,0 @@
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-asyncio_mode = "auto"
-markers = [
-    "integration: cross-module integration tests",
-    "live: requires real GPU/vLLM server (run manually)",
-    "slow: tests taking >5 seconds",
-]
-addopts = "-m 'not live'"
