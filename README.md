@@ -41,7 +41,7 @@ vllm serve Qwen/Qwen3-30B-A3B-Instruct-2507-FP8 --port 8001
 python -m paper_filter download -c eccv -y 2024
 
 # All conferences
-./scripts/run_all.sh download
+./scripts/download_all.sh
 ```
 
 Output: `output/pdfs/{CONF}_{YEAR}/` with all PDFs.

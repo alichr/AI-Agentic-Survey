@@ -1,7 +1,7 @@
 pipeline:
   output_dir: "output"
   cache_dir: "cache"
-  relevance_threshold: 5
+  relevance_threshold: 8
   max_classify_concurrent: 20
   log_level: "INFO"
 
