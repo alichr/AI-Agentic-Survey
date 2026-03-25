@@ -11,44 +11,50 @@ set -e
 OUTPUT_DIR="${1:-output}"
 LOG_LEVEL="INFO"
 
+# Status key:
+#   uncommented = needs downloading
+#   # DONE      = fully downloaded
+#   # BLOCKED   = requires manual download
+#   # PARTIAL   = partially downloaded, re-run to resume
+
 declare -a JOBS=(
-    "cvpr 2021"
-    "cvpr 2022"
-    "cvpr 2023"
-    "cvpr 2024"
-    "cvpr 2025"
-    "iccv 2021"
-    "iccv 2023"
-    "iccv 2025"
-    "eccv 2022"
-    "eccv 2024"
-    "iclr 2021"
-    "iclr 2022"
-    "iclr 2023"
-    "iclr 2024"
-    "iclr 2025"
-    "iclr 2026"
-    "icml 2021"
-    "icml 2022"
-    "icml 2023"
-    "icml 2024"
-    "icml 2025"
-    "neurips 2021"
-    "neurips 2022"
-    "neurips 2023"
-    "neurips 2024"
-    "neurips 2025"
-    "emnlp 2021"
-    "emnlp 2022"
-    "emnlp 2023"
-    "emnlp 2024"
-    "emnlp 2025"
-    "aaai 2021"
-    "aaai 2022"
-    "aaai 2023"
-    "aaai 2024"
-    "aaai 2025"
-    "aaai 2026"
+    # DONE "cvpr 2021"       # 1660 PDFs
+    # DONE "cvpr 2022"       # 2071 PDFs
+    # DONE "cvpr 2023"       # 2351 PDFs
+    # DONE "cvpr 2024"       # 2711 PDFs
+    # DONE "cvpr 2025"       # 2870 PDFs
+    # DONE "iccv 2021"       # 1612 PDFs
+    # DONE "iccv 2023"       # 2155 PDFs
+    # DONE "iccv 2025"       # 2700 PDFs
+    # DONE "eccv 2022"       # 1645 PDFs
+    # DONE "eccv 2024"       # 2379 PDFs
+    # PARTIAL "iclr 2021"    # 45 PDFs (old fetcher, needs re-download)
+    "iclr 2022"              # not yet downloaded (requires .env)
+    "iclr 2023"              # not yet downloaded (requires .env)
+    # DONE "iclr 2024"       # 2260 PDFs
+    "iclr 2025"              # 1038/3703 PDFs (partial, resume)
+    # DONE "iclr 2026"       # 5355 PDFs
+    # DONE "icml 2021"       # 1183 PDFs
+    # DONE "icml 2022"       # 1233 PDFs
+    # DONE "icml 2023"       # 1828 PDFs
+    # DONE "icml 2024"       # 2610 PDFs
+    # BLOCKED "icml 2025"    # blocked by icml.cc
+    # DONE "neurips 2021"    # 2334 PDFs
+    # DONE "neurips 2022"    # 2834 PDFs
+    # DONE "neurips 2023"    # 3540 PDFs
+    "neurips 2024"            # 1041 PDFs (partial, resume)
+    "neurips 2025"            # 111 PDFs (partial, resume)
+    # DONE "emnlp 2021"      # 889 PDFs
+    # DONE "emnlp 2022"      # 893 PDFs
+    # DONE "emnlp 2023"      # 1174 PDFs
+    # DONE "emnlp 2024"      # 1436 PDFs
+    # DONE "emnlp 2025"      # 1996 PDFs
+    # DONE "aaai 2021"       # 1635 PDFs
+    # DONE "aaai 2022"       # 1306 PDFs
+    # DONE "aaai 2023"       # 1557 PDFs
+    "aaai 2024"               # not yet downloaded
+    # DONE "aaai 2025"       # 3028 PDFs
+    # DONE "aaai 2026"       # 4149 PDFs
 )
 
 TOTAL=${#JOBS[@]}

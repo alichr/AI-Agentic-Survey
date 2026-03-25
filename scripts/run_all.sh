@@ -29,9 +29,6 @@ declare -a JOBS=(
     "iccv 2025"
     "eccv 2022"
     "eccv 2024"
-    "iclr 2021"
-    "iclr 2022"
-    "iclr 2023"
     "iclr 2024"
     "iclr 2025"
     "iclr 2026"
@@ -39,7 +36,7 @@ declare -a JOBS=(
     "icml 2022"
     "icml 2023"
     "icml 2024"
-    "icml 2025"
+    # "icml 2025"       # blocked
     "neurips 2021"
     "neurips 2022"
     "neurips 2023"
@@ -53,7 +50,7 @@ declare -a JOBS=(
     "aaai 2021"
     "aaai 2022"
     "aaai 2023"
-    "aaai 2024"
+    # "aaai 2024"       # not yet downloaded
     "aaai 2025"
     "aaai 2026"
 )
