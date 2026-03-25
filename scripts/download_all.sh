@@ -52,7 +52,7 @@ declare -a JOBS=(
     # DONE "aaai 2021"       # 1635 PDFs
     # DONE "aaai 2022"       # 1306 PDFs
     # DONE "aaai 2023"       # 1557 PDFs
-    "aaai 2024"               # not yet downloaded
+    # DONE "aaai 2024"       # 2291 PDFs
     # DONE "aaai 2025"       # 3028 PDFs
     # DONE "aaai 2026"       # 4149 PDFs
 )

@@ -50,7 +50,7 @@ declare -a JOBS=(
     "aaai 2021"
     "aaai 2022"
     "aaai 2023"
-    # "aaai 2024"       # not yet downloaded
+    "aaai 2024"
     "aaai 2025"
     "aaai 2026"
 )
