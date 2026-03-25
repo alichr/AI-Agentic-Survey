@@ -38,12 +38,12 @@ declare -a JOBS=(
     # DONE "icml 2022"       # 1233 PDFs
     # DONE "icml 2023"       # 1828 PDFs
     # DONE "icml 2024"       # 2610 PDFs
-    # DONE "icml 2025"       # 3257 PDFs (requires .env)
+    # DONE "icml 2025"       # 3305 PDFs (requires .env)
     # DONE "neurips 2021"    # 2334 PDFs
     # DONE "neurips 2022"    # 2834 PDFs
     # DONE "neurips 2023"    # 3540 PDFs
-    "neurips 2024"            # 1041 PDFs (partial, resume)
-    "neurips 2025"            # 111 PDFs (partial, resume)
+    # DONE "neurips 2024"    # 4169 PDFs (requires .env)
+    # DONE "neurips 2025"    # 5347 PDFs (requires .env)
     # DONE "emnlp 2021"      # 889 PDFs
     # DONE "emnlp 2022"      # 893 PDFs
     # DONE "emnlp 2023"      # 1174 PDFs
