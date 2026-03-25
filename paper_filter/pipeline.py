@@ -40,6 +40,14 @@ class DownloadPipeline:
         finally:
             self._cache.close()
 
+    def _get_auth_token(self) -> str:
+        """Get an OpenReview auth token if credentials are available."""
+        try:
+            from paper_filter.fetchers.openreview_api_fetcher import get_openreview_token
+            return get_openreview_token()
+        except Exception:
+            return ""
+
     async def _fetch(self) -> None:
         existing = self._cache.paper_count(self._conference, self._year)
         if existing > 0:
@@ -75,7 +83,19 @@ class DownloadPipeline:
             return pdf_dir
 
         logger.info("[DOWNLOAD] Downloading %d papers...", len(downloadable))
-        downloader = PDFDownloader(config=self._config.download, output_dir=self._config.pipeline.output_dir)
+
+        # Use OpenReview auth token if papers are from openreview.net
+        auth_token = ""
+        if any("openreview.net" in p.pdf_url for p in downloadable[:5]):
+            auth_token = self._get_auth_token()
+            if auth_token:
+                logger.info("[DOWNLOAD] Using authenticated OpenReview session")
+
+        downloader = PDFDownloader(
+            config=self._config.download,
+            output_dir=self._config.pipeline.output_dir,
+            auth_token=auth_token,
+        )
         pbar = tqdm(total=len(downloadable), desc="Downloading", unit="pdf")
 
         async def download_one(paper: Paper) -> None:

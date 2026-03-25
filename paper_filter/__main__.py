@@ -5,7 +5,11 @@ import asyncio
 import logging
 import sys
 
+from dotenv import load_dotenv
+
 from paper_filter.config import load_config
+
+load_dotenv()
 
 
 def parse_args() -> argparse.Namespace:

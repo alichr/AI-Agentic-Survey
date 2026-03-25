@@ -15,12 +15,23 @@ The stages share nothing. If automated download fails, you can manually download
 | ICCV | CVF Open Access | 2021, 2023, 2025 | Yes (Wayback Machine fallback) |
 | ECCV | ECVA | 2022, 2024 | Yes (Wayback Machine fallback) |
 | ICML | PMLR (2021–2024), icml.cc (2025) | 2021–2025 | Yes (2021–2024), blocked (2025) |
-| NeurIPS | proceedings.neurips.cc (2021–2024), neurips.cc (2025) | 2021–2025 | Yes (2021–2024), blocked (2025) |
-| ICLR | iclr.cc | 2021–2026 | Blocked (OpenReview) |
+| NeurIPS | proceedings.neurips.cc | 2021–2025 | Yes |
+| ICLR | OpenReview API (authenticated) | 2024–2026 | Yes (requires `.env` credentials) |
 | EMNLP | ACL Anthology XML | 2021–2025 | Yes |
 | AAAI | OJS Platform (main track) | 2021–2026 | Yes |
 
 **Blocked** = PDFs are on OpenReview which currently blocks automated downloads. Download them manually and use `process --pdf-dir`.
+
+### OpenReview Authentication (ICLR)
+
+ICLR papers are downloaded via the authenticated OpenReview API. Create a `.env` file in the project root:
+
+```
+OPENREVIEW_USERNAME="your@email.com"
+OPENREVIEW_PASSWORD="your_password"
+```
+
+The credentials are loaded automatically. Without them, ICLR downloads will fail with rate limiting.
 
 ## Setup
 
@@ -135,7 +146,7 @@ vllm:
   max_tokens: 512
 
 download:
-  max_concurrent: 30
-  max_retries: 3
+  max_concurrent: 3
+  max_retries: 6
   timeout: 60
 ```

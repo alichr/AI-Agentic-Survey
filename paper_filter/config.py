@@ -26,8 +26,8 @@ class VLLMConfig:
 
 @dataclass
 class DownloadConfig:
-    max_concurrent: int = 5
-    max_retries: int = 3
+    max_concurrent: int = 3
+    max_retries: int = 6
     retry_backoff: float = 2.0
     timeout: int = 60
 

@@ -20,8 +20,8 @@ def get_fetcher(conference: str, year: int | None = None) -> BaseFetcher:
         return NeurIPSProceedingsFetcher()
 
     elif key == "iclr":
-        from paper_filter.fetchers.openreview_fetcher import VirtualSiteFetcher
-        return VirtualSiteFetcher()
+        from paper_filter.fetchers.openreview_api_fetcher import OpenReviewAPIFetcher
+        return OpenReviewAPIFetcher()
 
     elif key == "icml":
         if year is not None and year >= 2025:

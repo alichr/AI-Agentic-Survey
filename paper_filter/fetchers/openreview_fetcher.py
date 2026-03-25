@@ -40,7 +40,7 @@ class VirtualSiteFetcher(BaseFetcher):
 
         papers = []
         for entry in results:
-            if entry.get("eventtype") != "Poster":
+            if entry.get("eventtype") not in ("Poster", "Oral"):
                 continue
 
             title = entry.get("name", "").strip()
