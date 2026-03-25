@@ -28,9 +28,9 @@ declare -a JOBS=(
     # DONE "iccv 2025"       # 2700 PDFs
     # DONE "eccv 2022"       # 1645 PDFs
     # DONE "eccv 2024"       # 2379 PDFs
-    # PARTIAL "iclr 2021"    # 45 PDFs (old fetcher, needs re-download)
-    "iclr 2022"              # not yet downloaded (requires .env)
-    "iclr 2023"              # not yet downloaded (requires .env)
+    # DONE "iclr 2021"       # 859 PDFs (requires .env, v1 API)
+    # DONE "iclr 2022"       # 1091 PDFs (requires .env, v1 API)
+    # DONE "iclr 2023"       # 1572 PDFs (requires .env, v1 API)
     # DONE "iclr 2024"       # 2260 PDFs
     # DONE "iclr 2025"       # 3703 PDFs
     # DONE "iclr 2026"       # 5355 PDFs
