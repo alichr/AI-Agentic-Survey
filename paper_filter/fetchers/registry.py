@@ -20,8 +20,12 @@ def get_fetcher(conference: str, year: int | None = None) -> BaseFetcher:
         return NeurIPSProceedingsFetcher()
 
     elif key == "iclr":
-        from paper_filter.fetchers.openreview_api_fetcher import OpenReviewAPIFetcher
-        return OpenReviewAPIFetcher()
+        if year is not None and year >= 2024:
+            from paper_filter.fetchers.openreview_api_fetcher import OpenReviewAPIFetcher
+            return OpenReviewAPIFetcher()
+        # ICLR 2021-2023: not on API v2, use v1 API
+        from paper_filter.fetchers.openreview_api_fetcher import OpenReviewV1Fetcher
+        return OpenReviewV1Fetcher()
 
     elif key == "icml":
         if year is not None and year >= 2025:
