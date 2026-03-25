@@ -16,38 +16,11 @@ The stages share nothing. If automated download fails, you can manually download
 | ECCV | ECVA | 2022, 2024 | Yes (Wayback Machine fallback) |
 | ICML | PMLR (2021–2024), icml.cc (2025) | 2021–2025 | Yes (2021–2024), blocked (2025) |
 | NeurIPS | proceedings.neurips.cc | 2021–2025 | Yes |
-| ICLR | OpenReview API (authenticated) | 2024–2026 | Yes (requires `.env` credentials) |
+| ICLR | OpenReview API (authenticated) | 2024–2026 | Yes (requires `.env`) |
 | EMNLP | ACL Anthology XML | 2021–2025 | Yes |
 | AAAI | OJS Platform (main track) | 2021–2026 | Yes |
 
-**Blocked** = PDFs are on OpenReview which currently blocks automated downloads. Download them manually and use `process --pdf-dir`.
-
-### OpenReview Authentication (ICLR)
-
-ICLR papers are hosted on OpenReview, which aggressively rate-limits unauthenticated requests (403 for bot User-Agents, 429 after ~50 requests). The solution is to use the authenticated OpenReview API with your account credentials.
-
-**How it works:**
-1. The `openreview-py` SDK authenticates with your account and fetches paper metadata + direct PDF hash URLs
-2. The downloader includes a Bearer token in all requests, bypassing rate limits entirely
-3. Downloads run at ~3-5 PDFs/sec with zero 429 errors (vs constant blocking without auth)
-
-**Setup:** Create a `.env` file in the project root (already in `.gitignore`):
-
-```
-OPENREVIEW_USERNAME="your@email.com"
-OPENREVIEW_PASSWORD="your_password"
-```
-
-Register a free account at [openreview.net](https://openreview.net) if you don't have one. Credentials are loaded automatically via `python-dotenv` — no manual `export` needed.
-
-```bash
-# Downloads ~2260 ICLR 2024 papers in ~10 minutes
-python -m paper_filter download -c iclr -y 2024
-
-# Also works for 2025 and 2026
-python -m paper_filter download -c iclr -y 2025
-python -m paper_filter download -c iclr -y 2026
-```
+**Blocked** = PDFs are on OpenReview which blocks unauthenticated downloads. See [OpenReview Authentication](#openreview-authentication-iclr) or download manually and use `process --pdf-dir`.
 
 ## Setup
 
@@ -59,6 +32,19 @@ pip install -r requirements.txt
 vllm serve Qwen/Qwen3-30B-A3B-Instruct-2507-FP8 --port 8001
 ```
 
+### OpenReview Authentication (ICLR)
+
+OpenReview aggressively rate-limits unauthenticated requests (403 for bot User-Agents, 429 after ~50 requests). The tool uses the `openreview-py` SDK with your account credentials to authenticate requests and bypass rate limits (~3-5 PDFs/sec, zero 429 errors).
+
+Create a `.env` file in the project root (already in `.gitignore`):
+
+```
+OPENREVIEW_USERNAME="your@email.com"
+OPENREVIEW_PASSWORD="your_password"
+```
+
+Register a free account at [openreview.net](https://openreview.net) if you don't have one. Credentials are loaded automatically via `python-dotenv`.
+
 ## Usage
 
 ### Step 1: Download (no vLLM needed)
@@ -66,6 +52,9 @@ vllm serve Qwen/Qwen3-30B-A3B-Instruct-2507-FP8 --port 8001
 ```bash
 # Single conference
 python -m paper_filter download -c eccv -y 2024
+
+# ICLR (requires .env credentials, ~10 min for ~2260 papers)
+python -m paper_filter download -c iclr -y 2024
 
 # All conferences
 ./scripts/download_all.sh
@@ -93,8 +82,8 @@ python -m paper_filter process \
 
 # Process manually downloaded PDFs
 python -m paper_filter process \
-  --pdf-dir /path/to/my/iclr-pdfs \
-  -c iclr -y 2024 \
+  --pdf-dir /path/to/my/pdfs \
+  -c icml -y 2025 \
   -t "test-time learning" \
   --relevance-threshold 8
 
