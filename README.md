@@ -24,14 +24,30 @@ The stages share nothing. If automated download fails, you can manually download
 
 ### OpenReview Authentication (ICLR)
 
-ICLR papers are downloaded via the authenticated OpenReview API. Create a `.env` file in the project root:
+ICLR papers are hosted on OpenReview, which aggressively rate-limits unauthenticated requests (403 for bot User-Agents, 429 after ~50 requests). The solution is to use the authenticated OpenReview API with your account credentials.
+
+**How it works:**
+1. The `openreview-py` SDK authenticates with your account and fetches paper metadata + direct PDF hash URLs
+2. The downloader includes a Bearer token in all requests, bypassing rate limits entirely
+3. Downloads run at ~3-5 PDFs/sec with zero 429 errors (vs constant blocking without auth)
+
+**Setup:** Create a `.env` file in the project root (already in `.gitignore`):
 
 ```
 OPENREVIEW_USERNAME="your@email.com"
 OPENREVIEW_PASSWORD="your_password"
 ```
 
-The credentials are loaded automatically. Without them, ICLR downloads will fail with rate limiting.
+Register a free account at [openreview.net](https://openreview.net) if you don't have one. Credentials are loaded automatically via `python-dotenv` — no manual `export` needed.
+
+```bash
+# Downloads ~2260 ICLR 2024 papers in ~10 minutes
+python -m paper_filter download -c iclr -y 2024
+
+# Also works for 2025 and 2026
+python -m paper_filter download -c iclr -y 2025
+python -m paper_filter download -c iclr -y 2026
+```
 
 ## Setup
 
