@@ -32,7 +32,7 @@ declare -a JOBS=(
     "iclr 2022"              # not yet downloaded (requires .env)
     "iclr 2023"              # not yet downloaded (requires .env)
     # DONE "iclr 2024"       # 2260 PDFs
-    "iclr 2025"              # 1038/3703 PDFs (partial, resume)
+    # DONE "iclr 2025"       # 3703 PDFs
     # DONE "iclr 2026"       # 5355 PDFs
     # DONE "icml 2021"       # 1183 PDFs
     # DONE "icml 2022"       # 1233 PDFs
