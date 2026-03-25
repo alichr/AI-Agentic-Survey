@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 # Venue ID patterns per conference
 VENUE_IDS = {
     "ICLR": "ICLR.cc/{year}/Conference",
+    "ICML": "ICML.cc/{year}/Conference",
 }
 
 

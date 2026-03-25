@@ -38,7 +38,7 @@ declare -a JOBS=(
     # DONE "icml 2022"       # 1233 PDFs
     # DONE "icml 2023"       # 1828 PDFs
     # DONE "icml 2024"       # 2610 PDFs
-    # BLOCKED "icml 2025"    # blocked by icml.cc
+    # DONE "icml 2025"       # 3257 PDFs (requires .env)
     # DONE "neurips 2021"    # 2334 PDFs
     # DONE "neurips 2022"    # 2834 PDFs
     # DONE "neurips 2023"    # 3540 PDFs

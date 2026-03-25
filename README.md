@@ -14,13 +14,13 @@ The stages share nothing. If automated download fails, you can manually download
 | CVPR | CVF Open Access | 2021–2025 | Yes (Wayback Machine fallback) |
 | ICCV | CVF Open Access | 2021, 2023, 2025 | Yes (Wayback Machine fallback) |
 | ECCV | ECVA | 2022, 2024 | Yes (Wayback Machine fallback) |
-| ICML | PMLR (2021–2024), icml.cc (2025) | 2021–2025 | Yes (2021–2024), blocked (2025) |
+| ICML | PMLR (2021–2024), OpenReview API (2025+) | 2021–2025 | Yes (2025 requires `.env`) |
 | NeurIPS | proceedings.neurips.cc | 2021–2025 | Yes |
 | ICLR | OpenReview API (authenticated) | 2024–2026 | Yes (requires `.env`) |
 | EMNLP | ACL Anthology XML | 2021–2025 | Yes |
 | AAAI | OJS Platform (main track) | 2021–2026 | Yes |
 
-**Blocked** = PDFs are on OpenReview which blocks unauthenticated downloads. See [OpenReview Authentication](#openreview-authentication-iclr) or download manually and use `process --pdf-dir`.
+Conferences hosted on OpenReview (ICLR, ICML 2025+) require authenticated access. See [OpenReview Authentication](#openreview-authentication-iclr).
 
 ## Setup
 

@@ -36,7 +36,7 @@ declare -a JOBS=(
     "icml 2022"
     "icml 2023"
     "icml 2024"
-    # "icml 2025"       # blocked
+    "icml 2025"
     "neurips 2021"
     "neurips 2022"
     "neurips 2023"

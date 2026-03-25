@@ -25,8 +25,8 @@ def get_fetcher(conference: str, year: int | None = None) -> BaseFetcher:
 
     elif key == "icml":
         if year is not None and year >= 2025:
-            from paper_filter.fetchers.openreview_fetcher import VirtualSiteFetcher
-            return VirtualSiteFetcher()
+            from paper_filter.fetchers.openreview_api_fetcher import OpenReviewAPIFetcher
+            return OpenReviewAPIFetcher()
         from paper_filter.fetchers.pmlr_fetcher import PMLRFetcher
         return PMLRFetcher()
 
