@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import re
 
 import requests
 from lxml import html
@@ -35,12 +36,11 @@ class NeurIPSProceedingsFetcher(BaseFetcher):
             # Convert abstract URL to PDF URL
             # /paper_files/paper/2024/hash/XXX-Abstract-Conference.html
             # -> /paper_files/paper/2024/file/XXX-Paper-Conference.pdf
-            # For 2021: XXX-Abstract.html -> XXX-Paper.pdf
+            # Handles all categories: Conference, Datasets_and_Benchmarks, etc.
             pdf_href = href.replace("/hash/", "/file/")
-            pdf_href = pdf_href.replace(
-                "-Abstract-Conference.html", "-Paper-Conference.pdf"
-            )
-            pdf_href = pdf_href.replace("-Abstract.html", "-Paper.pdf")
+            pdf_href = re.sub(r"-Abstract(-\w+)?\.html$",
+                              lambda m: f"-Paper{m.group(1) or ''}.pdf",
+                              pdf_href)
             pdf_url = f"https://proceedings.neurips.cc{pdf_href}"
 
             source_id = hashlib.sha256(
