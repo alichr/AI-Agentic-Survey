@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 VENUE_IDS = {
     "ICLR": "ICLR.cc/{year}/Conference",
     "ICML": "ICML.cc/{year}/Conference",
+    "NEURIPS": "NeurIPS.cc/{year}/Conference",
 }
 
 

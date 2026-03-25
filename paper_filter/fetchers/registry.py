@@ -13,9 +13,9 @@ def get_fetcher(conference: str, year: int | None = None) -> BaseFetcher:
     key = conference.lower().strip()
 
     if key in ("neurips", "nips"):
-        if year is not None and year >= 2025:
-            from paper_filter.fetchers.openreview_fetcher import VirtualSiteFetcher
-            return VirtualSiteFetcher()
+        if year is not None and year >= 2024:
+            from paper_filter.fetchers.openreview_api_fetcher import OpenReviewAPIFetcher
+            return OpenReviewAPIFetcher()
         from paper_filter.fetchers.neurips_fetcher import NeurIPSProceedingsFetcher
         return NeurIPSProceedingsFetcher()
 
